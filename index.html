@@ -1,4 +1,4 @@
-<!doctype html>
+﻿<!doctype html>
 <html lang="pt">
   <head>
     <meta charset="UTF-8" />
@@ -65,12 +65,13 @@
         </nav>
 
         <div class="login-card">
-          <span>Ver como</span>
-          <select id="demoAccountSelect"></select>
-          <strong id="currentSessionName">Admin</strong>
-          <small id="sessionHint">Acesso total ao sistema</small>
-          <button class="password-button" id="changePasswordButton" type="button">Alterar senha</button>
-          <button class="logout-button" id="logoutButton" type="button">Sair</button>
+          <div class="account-switcher">
+            <span>Ver como</span>
+            <select id="demoAccountSelect"></select>
+            <strong id="currentSessionName">Admin</strong>
+            <small id="sessionHint">Acesso total ao sistema</small>
+          </div>
+          <button class="logout-button sidebar-logout" id="logoutButton" type="button">Sair</button>
         </div>
       </aside>
 
@@ -83,7 +84,7 @@
           <div class="topbar-actions">
             <div class="notification-wrap">
               <button class="notification-button" id="notificationButton" type="button" aria-label="Notificações">
-                <span class="bell-icon">🔔</span>
+                <span class="bell-icon" aria-hidden="true">&#128276;</span>
                 <strong id="notificationCount" hidden>0</strong>
               </button>
               <div class="notification-panel" id="notificationPanel" hidden>
@@ -193,7 +194,7 @@
             </section>
             <section class="panel">
               <div class="panel-header">
-                <h2>Faltas aguardando validacao</h2>
+                <h2>Faltas aguardando validação</h2>
                 <button class="text-button" data-view-jump="absences" type="button">Abrir</button>
               </div>
               <div class="compact-list" id="rhAbsencesList"></div>
@@ -206,14 +207,14 @@
             <div>
               <span>Area do funcionario</span>
               <h2>Pedidos pessoais</h2>
-              <p>O funcionário consulta férias, pede os seus 15 dias e regista faltas.</p>
+              <p>O funcionário consulta férias, pede os seus 11 dias e regista faltas.</p>
             </div>
             <button class="primary-button" id="employeeVacationShortcut" type="button">Pedir férias</button>
           </div>
           <div class="metrics">
             <article class="metric"><span>Férias aprovadas</span><strong id="employeeApprovedDays">0</strong></article>
             <article class="metric"><span>Férias pendentes</span><strong id="employeePendingDays">0</strong></article>
-            <article class="metric"><span>Dias disponiveis</span><strong id="employeeAvailableDays">15</strong></article>
+            <article class="metric"><span>Dias disponiveis</span><strong id="employeeAvailableDays">11</strong></article>
             <article class="metric"><span>Faltas pendentes</span><strong id="employeePendingAbsences">0</strong></article>
           </div>
           <div class="content-grid">
@@ -383,14 +384,17 @@
         <section class="view" id="vacationsView">
           <div class="policy-strip">
             <strong>Regra de férias:</strong>
-            <span>30 dias por colaborador no ano. Cada pedido pode ter no máximo 15 dias a partir da data inicial; pedidos do funcionário geram aviso por email para Admin e RH.</span>
+            <span>22 dias por colaborador no ano. Cada pedido pode ter no máximo 11 dias a partir da data inicial; pedidos do funcionário geram aviso por email para Admin e RH.</span>
           </div>
           <div class="list-toolbar">
             <label class="search-box">
               <span>Pesquisar férias</span>
               <input id="vacationSearch" type="search" placeholder="Colaborador, estado ou origem" />
             </label>
-            <button class="primary-button" id="addVacationButton" type="button">Adicionar férias</button>
+            <div class="topbar-actions">
+              <button class="secondary-button" id="openVacationMapButton" type="button" hidden>Mapa de Férias</button>
+              <button class="primary-button" id="addVacationButton" type="button">Adicionar férias</button>
+            </div>
           </div>
           <div class="table-wrap">
             <table>
@@ -435,6 +439,36 @@
         </section>
       </main>
     </div>
+
+    <dialog id="vacationMapDialog" class="vacation-map-dialog">
+      <div class="vacation-map-dialog-shell">
+        <div class="vacation-map-dialog-actions">
+          <div>
+            <strong>Mapa de Férias</strong>
+          </div>
+          <div class="vacation-map-actions">
+            <button class="secondary-button" id="printVacationMapButton" type="button">Imprimir</button>
+            <button class="secondary-button" id="exportVacationMapPdfButton" type="button">Exportar PDF</button>
+            <button class="secondary-button" id="exportVacationMapExcelButton" type="button">Exportar Excel</button>
+            <button class="icon-button" id="closeVacationMapButton" type="button" aria-label="Fechar">x</button>
+          </div>
+        </div>
+        <div class="vacation-map-toolbar" id="vacationMapToolbar">
+          <label class="search-box">
+            <span>Pesquisar colaborador</span>
+            <input id="vacationMapSearch" type="search" placeholder="Nome, notas, origem ou estado" />
+          </label>
+          <label class="search-box">
+            <span>Filtrar equipa</span>
+            <select id="vacationMapTeamFilter">
+              <option value="">Todas as equipas</option>
+            </select>
+          </label>
+          <div></div>
+        </div>
+        <div id="vacationMap"></div>
+      </div>
+    </dialog>
 
     <dialog id="recordDialog">
       <form id="recordForm" method="dialog">
@@ -535,9 +569,12 @@
     </template>
 
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/jspdf-autotable@3.8.4/dist/jspdf.plugin.autotable.min.js"></script>
     <script src="supabase-config.js"></script>
     <script src="app.js"></script>
   </body>
 </html>
+
+

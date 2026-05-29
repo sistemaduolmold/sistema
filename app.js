@@ -1,4 +1,7 @@
-const storageKey = "duomold-demo-v3";
+﻿const storageKey = "duomold-demo-v3";
+
+const maxVacationRequestDays = 11;
+const annualVacationDays = 22;
 
 const demoData = {
   activeAccount: "user:user-admin",
@@ -19,13 +22,8 @@ const demoData = {
     { id: "order-1", clientId: "client-ana", reference: "OS-2026-001", title: "Planeamento de molde", description: "Molde técnico para nova encomenda.", status: "Em produção", progress: "45", dueDate: "2026-06-15", weeklyUpdate: "Molde em fase de planeamento e validação técnica.", tasks: "Revisão técnica; preparação MOD 54; preparação MOD 55." },
     { id: "order-2", clientId: "client-carlos", reference: "OS-2026-002", title: "Ajuste de cavidade", description: "Revisão e ajuste de molde existente.", status: "Em análise", progress: "20", dueDate: "2026-06-28", weeklyUpdate: "Equipa técnica a rever ficheiros enviados.", tasks: "Análise dimensional; contacto com cliente." }
   ],
-  vacations: [
-    { id: "vac-1", userId: "user-funcionario", startDate: "2026-07-01", endDate: "2026-07-15", days: "15", origin: "Admin/RH", status: "Aprovado", notes: "Periodo definido pela administracao.", decidedBy: "Administrador" },
-    { id: "vac-2", userId: "user-funcionario", startDate: "2026-08-10", endDate: "2026-08-14", days: "5", origin: "Funcionario", status: "Pendente", notes: "Pedido do funcionario.", decidedBy: "" }
-  ],
-  absences: [
-    { id: "abs-1", userId: "user-funcionario", date: "2026-05-20", type: "Justificada", status: "Pendente", reason: "Consulta medica", decidedBy: "" }
-  ],
+  vacations: [],
+  absences: [],
   notifications: []
 };
 
@@ -112,6 +110,33 @@ const planningBase = [
   ["Post Tryout Mold Venting", "", "", "", "Tarefa"]
 ].map(([nome, duracao, inicio, conclusao, tipo], index) => ({ id: index + 1, nome, duracao, inicio, conclusao, tipo, status: "0%", extras: [] }));
 
+const vacationMapYear = 2026;
+const vacationMapMonths = [
+  "JANEIRO",
+  "FEVEREIRO",
+  "MARÇO",
+  "ABRIL",
+  "MAIO",
+  "JUNHO",
+  "JULHO",
+  "AGOSTO",
+  "SETEMBRO",
+  "OUTUBRO",
+  "NOVEMBRO",
+  "DEZEMBRO"
+];
+const vacationWeekdays = ["D", "S", "T", "Q", "Q", "S", "S"];
+const vacationLegendItems = [
+  { code: "N", label: "Feriado nacional", className: "national-holiday" },
+  { code: "N", label: "Feriado municipal", className: "municipal-holiday" },
+  { code: "N", label: "Fim-de-semana", className: "weekend" },
+  { code: "", label: "Férias", className: "vacation" },
+  { code: "", label: "Dia a não marcar", className: "blocked-day" },
+  { code: "", label: "Carnaval", className: "carnival" },
+  { code: "", label: "Férias do ano anterior / ano de admissão", className: "previous-year" },
+  { code: "", label: "Meio-dia de férias", className: "half-day" }
+];
+
 let state = loadState();
 let currentView = "adminPage";
 let dialogMode = "client";
@@ -120,7 +145,9 @@ let dialogAttachments = [];
 let isLoggedIn = false;
 let supabaseClient = null;
 let supabaseSaveTimer = null;
+const orderNotificationTimers = new Map();
 let applyingRemoteState = false;
+let savingSupabase = false;
 
 const views = {
   dashboard: qs("#dashboardView"),
@@ -140,8 +167,8 @@ const views = {
 const titles = {
   dashboard: ["Painel", "Visão geral dos clientes e equipa."],
   adminPage: ["Admin", "Painel administrativo da DUOMOLD."],
-  rhPage: ["RH", "Gestao de férias, faltas e colaboradores."],
-  employeePage: ["Funcionario", "Area pessoal para férias e faltas."],
+  rhPage: ["RH", "Gestão de férias, faltas e colaboradores."],
+  employeePage: ["Funcionario", "Área pessoal para férias e faltas."],
   clients: ["Clientes / Empresas", "Cadastro unificado de clientes, empresas e acessos."],
   companies: ["Empresas", "Dados basicos das empresas."],
   orders: ["Encomendas", "Pedidos de clientes e acompanhamento semanal."],
@@ -203,7 +230,7 @@ const forms = {
     ["status", "Estado", "select:Ativo|Inativo"]
   ],
   profileUser: [
-    ["employeeNumber", "MatrÃ­cula", "text", true],
+    ["employeeNumber", "Matrícula", "text", true],
     ["name", "Nome", "text", true],
     ["email", "Email", "email", true],
     ["phone", "Telefone", "tel"],
@@ -219,13 +246,14 @@ const forms = {
     ["phone", "Telefone", "tel"],
     ["city", "Cidade", "text"],
     ["sector", "Setor", "text"],
-    ["role", "FunÃ§Ã£o/Cargo", "text"],
+    ["role", "Função/Cargo", "text"],
     ["address", "Morada da Empresa", "textarea"],
-    ["notes", "ObservaÃ§Ãµes", "textarea"]
+    ["notes", "Observações", "textarea"]
   ],
   vacation: [
     ["userId", "Colaborador", "user", true],
     ["origin", "Origem", "select:Admin/RH|Funcionario"],
+    ["mapCode", "Código do mapa", "select:F|BG|DC"],
     ["startDate", "Data inicial", "date", true],
     ["endDate", "Data final", "date", true],
     ["days", "Dias úteis calculados", "number"],
@@ -254,6 +282,8 @@ function loadState() {
     return mergeState(saved);
   } catch {
     const fresh = structuredClone(demoData);
+    fresh.vacations = [];
+    fresh.absences = [];
     localStorage.setItem(storageKey, JSON.stringify(fresh));
     return fresh;
   }
@@ -262,11 +292,16 @@ function loadState() {
 function mergeState(saved) {
   const merged = structuredClone(demoData);
   Object.assign(merged, saved);
-  ["companies", "clients", "users", "orders", "vacations", "absences"].forEach((key) => {
+  ["companies", "clients", "users", "orders"].forEach((key) => {
     if (!Array.isArray(merged[key]) || !merged[key].length) merged[key] = structuredClone(demoData[key]);
   });
   if (!Array.isArray(merged.notifications)) merged.notifications = [];
   merged.users = merged.users.map((user, index) => ({ ...user, employeeNumber: user.employeeNumber || `COL-${String(index + 1).padStart(3, "0")}` }));
+  // Ferias nunca sao carregadas do localStorage nem do duomold_app_state.
+  // A fonte unica e a tabela public.vacations no Supabase.
+  merged.vacations = [];
+  // Faltas tambem usam apenas a tabela public.absences no Supabase.
+  merged.absences = [];
   const adminUser = merged.users.find((user) => user.id === "user-admin");
   if (adminUser) {
     if (!adminUser.email || adminUser.email === "admin@empresa.pt") adminUser.email = "sistemaduolmold@gmail.com";
@@ -276,6 +311,26 @@ function mergeState(saved) {
   if (!merged.activeAccount) merged.activeAccount = "user:user-admin";
   localStorage.setItem(storageKey, JSON.stringify(merged));
   return merged;
+}
+
+function cleanVacationRecords(vacations, users = []) {
+  const removedDemoIds = new Set(["vac-1", "vac-2"]);
+  const validUserIds = new Set(users.map((user) => user.id));
+  return (Array.isArray(vacations) ? vacations : [])
+    .filter((vacation) => vacation?.id && !removedDemoIds.has(vacation.id))
+    .filter((vacation) => vacation.userId && validUserIds.has(vacation.userId))
+    .map((vacation) => ({
+      ...vacation,
+      days: String(Math.min(Number(vacation.days || 0), maxVacationRequestDays))
+    }));
+}
+
+function cleanAbsenceRecords(absences, users = []) {
+  const removedDemoIds = new Set(["abs-1"]);
+  const validUserIds = new Set(users.map((user) => user.id));
+  return (Array.isArray(absences) ? absences : [])
+    .filter((absence) => absence?.id && !removedDemoIds.has(absence.id))
+    .filter((absence) => absence.userId && validUserIds.has(absence.userId));
 }
 
 function normalizeOrderText(order) {
@@ -290,14 +345,32 @@ function normalizeOrderText(order) {
     status: statusMap[order.status] || order.status,
     showPlanningToClient: order.showPlanningToClient || "Sim",
     showScheduleToClient: order.showScheduleToClient || "Sim",
-    history: Array.isArray(order.history) ? order.history : []
+    history: Array.isArray(order.history) ? order.history.map((entry) => ({
+      ...entry,
+      status: entry.status || "Falta"
+    })).filter(isManualOrderHistoryEntry) : []
   };
+}
+
+function isManualOrderHistoryEntry(entry) {
+  const details = Array.isArray(entry?.details) ? entry.details : entry?.details ? [entry.details] : [];
+  if (!details.length) return false;
+  return !details.some((detail) => isAutomaticOrderHistoryDetail(detail));
+}
+
+function isAutomaticOrderHistoryDetail(detail) {
+  return /^(Estado|Progresso \(%\)|Previsao de entrega|Previsão de entrega|Atualizacao semanal|Atualização semanal|Tarefas internas|Titulo|Título|Descricao|Descrição|Planeamento visivel ao cliente|Planeamento visível ao cliente|Cronograma visivel ao cliente|Cronograma visível ao cliente):/i.test(String(detail || "").trim());
 }
 
 function saveState() {
   localStorage.setItem(storageKey, JSON.stringify(state));
   scheduleSupabaseSave();
   render();
+}
+
+function persistStateOnly() {
+  localStorage.setItem(storageKey, JSON.stringify(state));
+  scheduleSupabaseSave();
 }
 
 function initSupabase() {
@@ -318,12 +391,17 @@ async function loadStateFromSupabase() {
       .maybeSingle();
     if (error) throw error;
     if (!data?.data) {
+      state.vacations = [];
+      state.absences = [];
+      await loadCoreDataFromSupabase();
       await saveStateToSupabase();
+      render();
       return;
     }
     applyingRemoteState = true;
     state = mergeState(data.data);
     applyingRemoteState = false;
+    await loadCoreDataFromSupabase();
     render();
   } catch (error) {
     applyingRemoteState = false;
@@ -339,20 +417,71 @@ function scheduleSupabaseSave() {
 
 async function saveStateToSupabase() {
   if (!supabaseClient) return;
+  if (savingSupabase) {
+    clearTimeout(supabaseSaveTimer);
+    supabaseSaveTimer = setTimeout(saveStateToSupabase, 600);
+    return;
+  }
   const config = window.DUOMOLD_SUPABASE;
+  savingSupabase = true;
   try {
     const payload = {
       id: config.stateId,
-      data: state,
+      data: appStatePayload(),
       updated_at: new Date().toISOString()
     };
     const { error } = await supabaseClient
       .from(config.stateTable)
       .upsert(payload, { onConflict: "id" });
-    if (error) throw error;
+    if (error) console.warn("Nao foi possivel gravar o estado geral no Supabase.", error);
+    await syncCoreTablesToSupabase();
   } catch (error) {
     console.warn("Nao foi possivel gravar no Supabase. Os dados ficaram guardados localmente.", error);
+  } finally {
+    savingSupabase = false;
   }
+}
+
+function appStatePayload() {
+  return {
+    ...state,
+    vacations: [],
+    absences: []
+  };
+}
+
+async function syncCoreTablesToSupabase() {
+  await safeUpsertRows("companies", state.companies.map(companyToSupabase));
+  await safeUpsertRows("clients", state.clients.map(clientToSupabase));
+  await safeUpsertRows("users", state.users.map(userToSupabase));
+  await safeUpsertRows("orders", state.orders.map(orderToSupabase));
+  await safeUpsertRows("vacations", state.vacations.map(vacationToSupabase));
+  await safeUpsertRows("absences", state.absences.map(absenceToSupabase));
+  await safeUpsertRows("notifications", state.notifications.map(notificationToSupabase));
+}
+
+async function safeUpsertRows(tableName, rows, attempt = 0) {
+  if (!supabaseClient || !rows.length) return;
+  const { error } = await supabaseClient.from(tableName).upsert(rows, { onConflict: "id" });
+  if (!error) return;
+  const message = String(error.message || "");
+  const missingColumn = message.match(/column "([^"]+)" .*does not exist/i)?.[1]
+    || message.match(/Could not find the '([^']+)' column/i)?.[1];
+  if (missingColumn && attempt < 8) {
+    await safeUpsertRows(tableName, rows.map((row) => {
+      const copy = { ...row };
+      delete copy[missingColumn];
+      return copy;
+    }), attempt + 1);
+    return;
+  }
+  console.warn(`Nao foi possivel sincronizar a tabela ${tableName}.`, error);
+}
+
+async function deleteSupabaseRecord(tableName, id) {
+  if (!supabaseClient || !tableName || !id) return;
+  const { error } = await supabaseClient.from(tableName).delete().eq("id", id);
+  if (error) console.warn(`Nao foi possivel apagar ${id} em ${tableName}.`, error);
 }
 
 function account() {
@@ -400,7 +529,9 @@ function setView(view) {
   currentView = allowedViews().includes(view) ? view : defaultView();
   Object.entries(views).forEach(([name, element]) => element?.classList.toggle("active", name === currentView));
   qsa(".nav-item").forEach((button) => {
-    button.hidden = !allowedViews().includes(button.dataset.view);
+    const roleLimit = button.dataset.roles ? button.dataset.roles.split(",").map((item) => item.trim()).filter(Boolean) : [];
+    const roleAllowed = !roleLimit.length || roleLimit.includes(role());
+    button.hidden = !allowedViews().includes(button.dataset.view) || !roleAllowed;
     button.classList.toggle("active", button.dataset.view === currentView);
   });
   qs("#pageTitle").textContent = titles[currentView][0];
@@ -463,6 +594,8 @@ function render() {
 }
 
 function renderAccountSelector() {
+  const accountSwitcher = qs(".account-switcher");
+  if (accountSwitcher) accountSwitcher.hidden = role() !== "Admin";
   const options = [
     ...state.users.map((user) => ({ value: `user:${user.id}`, label: `${user.name} - ${user.role}` })),
     ...state.clients.map((client) => ({ value: `client:${client.id}`, label: `${client.name} - Cliente` }))
@@ -497,7 +630,7 @@ async function loginWithCredentials(event) {
   }
   if (supabaseLogin) await loadCoreDataFromSupabase();
   state.activeAccount = user ? `user:${user.id}` : `client:${client.id}`;
-  localStorage.setItem(storageKey, JSON.stringify(state));
+  persistStateOnly();
   isLoggedIn = true;
   qs("#loginAlert").textContent = "";
   qs("#loginForm").reset();
@@ -537,7 +670,7 @@ async function findSupabaseLogin(email, password) {
     console.warn("Erro no login Supabase", error);
     return {
       type: "error",
-      message: "NÃ£o foi possÃ­vel validar no Supabase. Confirme se executou o SQL completo e se a chave estÃ¡ correta."
+      message: "Não foi possível validar no Supabase. Confirme se executou o SQL completo e se a chave está correta."
     };
   }
 }
@@ -610,20 +743,39 @@ async function loadCoreDataFromSupabase() {
       supabaseClient.from("absences").select("*").order("created_at", { ascending: true }),
       supabaseClient.from("notifications").select("*").order("created_at", { ascending: false })
     ]);
-    [companies, clients, users, orders, vacations, absences, notifications].forEach((result) => {
-      if (result.error) throw result.error;
-    });
-    state.companies = companies.data.map(mapCompanyFromSupabase);
-    state.clients = clients.data.map(mapClientFromSupabase);
-    state.users = users.data.map(mapUserFromSupabase);
-    state.orders = orders.data.map(mapOrderFromSupabase);
-    state.vacations = vacations.data.map(mapVacationFromSupabase);
-    state.absences = absences.data.map(mapAbsenceFromSupabase);
-    state.notifications = notifications.data.map(mapNotificationFromSupabase);
-    localStorage.setItem(storageKey, JSON.stringify(state));
+    if (companies.error) console.warn("Nao foi possivel carregar companies.", companies.error);
+    else state.companies = mergeSupabaseCollection(state.companies, companies.data.map(mapCompanyFromSupabase));
+
+    if (clients.error) console.warn("Nao foi possivel carregar clients.", clients.error);
+    else state.clients = mergeSupabaseCollection(state.clients, clients.data.map(mapClientFromSupabase));
+
+    if (users.error) console.warn("Nao foi possivel carregar users.", users.error);
+    else state.users = mergeSupabaseCollection(state.users, users.data.map(mapUserFromSupabase));
+
+    if (orders.error) console.warn("Nao foi possivel carregar orders.", orders.error);
+    else state.orders = mergeSupabaseCollection(state.orders, orders.data.map(mapOrderFromSupabase));
+
+    if (vacations.error) console.warn("Nao foi possivel carregar vacations.", vacations.error);
+    else state.vacations = cleanVacationRecords(vacations.data.map(mapVacationFromSupabase), state.users);
+
+    if (absences.error) console.warn("Nao foi possivel carregar absences.", absences.error);
+    else state.absences = cleanAbsenceRecords(absences.data.map(mapAbsenceFromSupabase), state.users);
+
+    if (notifications.error) console.warn("Nao foi possivel carregar notifications.", notifications.error);
+    else state.notifications = mergeSupabaseCollection(state.notifications, notifications.data.map(mapNotificationFromSupabase));
+    persistStateOnly();
   } catch (error) {
     console.warn("Nao foi possivel carregar tabelas principais do Supabase.", error);
   }
+}
+
+function mergeSupabaseCollection(existingRows = [], supabaseRows = []) {
+  const byId = new Map(existingRows.map((item) => [item.id, item]));
+  supabaseRows.forEach((item) => {
+    const cleanItem = Object.fromEntries(Object.entries(item).filter(([, value]) => value !== undefined));
+    byId.set(item.id, { ...(byId.get(item.id) || {}), ...cleanItem });
+  });
+  return [...byId.values()];
 }
 
 function mapCompanyFromSupabase(row) {
@@ -664,7 +816,7 @@ function mapUserFromSupabase(row) {
     email: row.email || "",
     password: row.password || "",
     phone: row.phone || "",
-    role: row.profile || "Funcionario",
+    role: row.profile || row.role || "Funcionario",
     department: row.department || "",
     position: row.position || "",
     status: row.status || "Ativo"
@@ -672,7 +824,10 @@ function mapUserFromSupabase(row) {
 }
 
 function mapOrderFromSupabase(row) {
-  return normalizeOrderText({
+  const hasPlanningFlag = Object.prototype.hasOwnProperty.call(row, "show_planning_to_client");
+  const hasScheduleFlag = Object.prototype.hasOwnProperty.call(row, "show_schedule_to_client");
+  const hasHistory = Object.prototype.hasOwnProperty.call(row, "history");
+  const mapped = normalizeOrderText({
     id: row.id,
     clientId: row.client_id || "",
     reference: row.reference || "",
@@ -683,9 +838,17 @@ function mapOrderFromSupabase(row) {
     dueDate: row.due_date || "",
     weeklyUpdate: row.weekly_update || "",
     tasks: row.tasks || "",
-    showPlanningToClient: row.show_planning_to_client ? "Sim" : "NÃ£o",
-    showScheduleToClient: row.show_schedule_to_client ? "Sim" : "NÃ£o"
+    showPlanningToClient: hasPlanningFlag ? row.show_planning_to_client ? "Sim" : "Não" : undefined,
+    showScheduleToClient: hasScheduleFlag ? row.show_schedule_to_client ? "Sim" : "Não" : undefined,
+    history: Array.isArray(row.history) ? row.history : undefined,
+    schedule: row.schedule || undefined,
+    planning: row.planning || undefined,
+    moldPhotos: Array.isArray(row.mold_photos) ? row.mold_photos : undefined
   });
+  if (!hasPlanningFlag) delete mapped.showPlanningToClient;
+  if (!hasScheduleFlag) delete mapped.showScheduleToClient;
+  if (!hasHistory) delete mapped.history;
+  return mapped;
 }
 
 function mapVacationFromSupabase(row) {
@@ -696,9 +859,12 @@ function mapVacationFromSupabase(row) {
     endDate: row.end_date || "",
     days: String(row.days ?? 0),
     origin: row.origin || "Funcionario",
+    mapCode: row.map_code || row.mapCode || deriveVacationCode(row),
     status: row.status || "Pendente",
     notes: row.notes || "",
-    decidedBy: row.decided_by || "",
+    decidedBy: row.decided_by || userName(row.approved_by) || "",
+    decidedById: row.approved_by || "",
+    decidedAt: row.approved_at || "",
     linkedAbsenceId: row.linked_absence_id || ""
   };
 }
@@ -709,24 +875,150 @@ function mapAbsenceFromSupabase(row) {
     userId: row.user_id || "",
     date: row.date || "",
     type: row.type || "Justificada",
-    compensateVacation: row.compensate_vacation ? "Sim" : "NÃ£o",
+    compensateVacation: row.compensate_vacation ? "Sim" : "Não",
     status: row.status || "Pendente",
     reason: row.reason || "",
-    decidedBy: row.decided_by || ""
+    decidedBy: row.decided_by || "",
+    attachments: Array.isArray(row.attachments) ? row.attachments : undefined
   };
 }
 
 function mapNotificationFromSupabase(row) {
-  return {
+  const target = row.target || (row.user_id ? `user:${row.user_id}` : "");
+  return normalizeNotificationText({
     id: row.id,
-    to: row.target || "",
+    to: target,
     title: row.title || "",
     message: row.message || "",
     page: row.page || "",
+    link: row.page || "",
     recordType: row.record_type || "",
     recordId: row.record_id || "",
-    read: Boolean(row.is_read),
+    read: Boolean(row.is_read ?? row.read),
     createdAt: row.created_at || new Date().toISOString()
+  });
+}
+
+function companyToSupabase(company) {
+  return {
+    id: company.id,
+    name: company.name || "",
+    vat: company.vat || "",
+    email: company.email || "",
+    phone: company.phone || "",
+    city: company.city || "",
+    sector: company.sector || "",
+    address: company.address || "",
+    notes: company.notes || "",
+    status: company.status || "Ativo"
+  };
+}
+
+function clientToSupabase(client) {
+  return {
+    id: client.id,
+    company_id: client.companyId || "",
+    name: client.name || "",
+    email: client.email || "",
+    password: client.password || "",
+    phone: client.phone || "",
+    role: client.role || "",
+    owner: client.owner || "Admin",
+    status: client.status || "Ativo",
+    notes: client.notes || ""
+  };
+}
+
+function userToSupabase(user) {
+  return {
+    id: user.id,
+    employee_number: user.employeeNumber || "",
+    name: user.name || "",
+    email: user.email || "",
+    password: user.password || "",
+    phone: user.phone || "",
+    profile: user.role || "Funcionario",
+    role: user.role || "Funcionario",
+    department: user.department || "",
+    position: user.position || "",
+    status: user.status || "Ativo"
+  };
+}
+
+function orderToSupabase(order) {
+  return {
+    id: order.id,
+    client_id: order.clientId || "",
+    reference: order.reference || "",
+    title: order.title || "",
+    description: order.description || "",
+    status: order.status || "Recebido",
+    progress: Number(order.progress || 0),
+    due_date: order.dueDate || null,
+    weekly_update: order.weeklyUpdate || "",
+    tasks: order.tasks || "",
+    show_planning_to_client: (order.showPlanningToClient || "Sim") === "Sim",
+    show_schedule_to_client: (order.showScheduleToClient || "Sim") === "Sim",
+    history: Array.isArray(order.history) ? order.history : [],
+    schedule: order.schedule || {},
+    planning: order.planning || null,
+    mold_photos: Array.isArray(order.moldPhotos) ? order.moldPhotos : []
+  };
+}
+
+function vacationToSupabase(vacation) {
+  return {
+    id: vacation.id,
+    user_id: vacation.userId || "",
+    start_date: vacation.startDate || null,
+    end_date: vacation.endDate || null,
+    days: Number(vacation.days || 0),
+    origin: vacation.origin || "Funcionario",
+    map_code: vacationCode(vacation),
+    status: vacation.status || "Pendente",
+    notes: vacation.notes || "",
+    decided_by: vacation.decidedBy || "",
+    linked_absence_id: vacation.linkedAbsenceId || null,
+    approved_by: vacation.decidedById || null,
+    approved_at: vacation.decidedAt || null
+  };
+}
+
+function absenceToSupabase(absence) {
+  return {
+    id: absence.id,
+    user_id: absence.userId || "",
+    date: absence.date || null,
+    type: absence.type || "Justificada",
+    compensate_vacation: absence.compensateVacation === "Sim",
+    status: absence.status || "Pendente",
+    reason: absence.reason || "",
+    decided_by: absence.decidedBy || "",
+    attachments: Array.isArray(absence.attachments) ? absence.attachments : []
+  };
+}
+
+function notificationToSupabase(notification) {
+  const normalized = normalizeNotificationText(notification);
+  return {
+    id: normalized.id,
+    target: normalized.to || "",
+    title: normalized.title || "",
+    message: normalized.message || "",
+    page: normalized.link || normalized.page || "",
+    record_type: normalized.recordType || "",
+    record_id: normalized.recordId || "",
+    is_read: Boolean(normalized.read),
+    created_at: normalized.createdAt || new Date().toISOString()
+  };
+}
+
+function normalizeNotificationText(notification) {
+  if (notification?.recordType !== "order") return notification;
+  return {
+    ...notification,
+    title: "Encomenda atualizada",
+    message: String(notification.message || "").split(":")[0].trim() || notification.message || ""
   };
 }
 
@@ -754,7 +1046,7 @@ function renderRolePages() {
   const pending = sum(vacations.filter((item) => item.status === "Pendente" && item.origin === "Funcionario"));
   text("#employeeApprovedDays", approved);
   text("#employeePendingDays", pending);
-  text("#employeeAvailableDays", Math.max(15 - approved - pending, 0));
+  text("#employeeAvailableDays", Math.max(annualVacationDays - approved - pending, 0));
   text("#employeePendingAbsences", state.absences.filter((item) => item.userId === employeeId && item.status === "Pendente").length);
   compact("#employeeVacationsList", vacations, (item) => ({ title: `${date(item.startDate)} a ${date(item.endDate)}`, meta: `${item.days} dias - ${item.origin}`, badge: item.status }));
   compact("#employeeAbsencesList", state.absences.filter((item) => item.userId === employeeId), (item) => ({ title: date(item.date), meta: item.reason, badge: item.status }));
@@ -855,10 +1147,11 @@ function renderProfile() {
         ["Cargo", record.position],
         ["Estado", record.status]
       ];
-  qs("#profileInfoGrid").innerHTML = items.map(([labelText, valueText]) => `
+  const visibleItems = items.filter(([, valueText]) => String(valueText || "").trim());
+  qs("#profileInfoGrid").innerHTML = visibleItems.map(([labelText, valueText]) => `
     <article class="profile-info-item">
       <span>${esc(labelText)}</span>
-      <strong>${esc(valueText || "Não preenchido")}</strong>
+      <strong>${esc(valueText)}</strong>
     </article>
   `).join("");
 }
@@ -893,21 +1186,31 @@ function renderNotifications() {
   `).join("") : `<div class="empty-state small">Sem notificações.</div>`;
 }
 
-function addNotification({ to, title, message, link = "" }) {
+function addNotification({ to, title, message, link = "", recordType = "", recordId = "" }) {
+  if (!to) return;
   state.notifications.unshift({
     id: `notif-${Date.now()}-${Math.random().toString(16).slice(2)}`,
     to,
     title,
     message,
     link,
+    recordType,
+    recordId,
     read: false,
     createdAt: new Date().toISOString()
   });
 }
 
-function notifyWithAdminCopy({ to, title, message, link = "" }) {
-  addNotification({ to, title, message, link });
-  if (to !== "role:Admin") addNotification({ to: "role:Admin", title, message, link });
+function notifyMany(targets, payload) {
+  [...new Set(targets.filter(Boolean))].forEach((to) => addNotification({ ...payload, to }));
+}
+
+function managerNotificationTargets(requestUserId = "") {
+  const requester = state.users.find((user) => user.id === requestUserId);
+  const requesterRole = requester?.role;
+  if (requesterRole === "Admin") return ["role:RH"];
+  if (requesterRole === "RH") return ["role:Admin"];
+  return ["role:Admin", "role:RH"];
 }
 
 function markNotificationsRead() {
@@ -915,7 +1218,7 @@ function markNotificationsRead() {
   state.notifications.forEach((item) => {
     if (ids.has(item.id)) item.read = true;
   });
-  localStorage.setItem(storageKey, JSON.stringify(state));
+  persistStateOnly();
   renderNotifications();
 }
 
@@ -923,7 +1226,7 @@ function openNotification(id) {
   const item = state.notifications.find((notification) => notification.id === id);
   if (!item) return;
   item.read = true;
-  localStorage.setItem(storageKey, JSON.stringify(state));
+  persistStateOnly();
   qs("#notificationPanel").hidden = true;
   setView(notificationTargetView(item));
   renderNotifications();
@@ -959,7 +1262,7 @@ function renderUsers() {
       <td><span class="status ${cls(user.role)}">${esc(user.role)}</span></td>
       <td><strong>${esc(user.email)}</strong><small>${esc(user.phone || "Sem telefone")}</small></td>
       <td>${esc(user.department || "Sem departamento")}</td>
-      <td><strong>${total}/30 dias</strong><small>Limite anual</small></td>
+      <td><strong>${total}/${annualVacationDays} dias</strong><small>Limite anual</small></td>
       <td><div class="row-actions">${role() === "Admin" ? `<button class="row-action" data-edit-user="${user.id}">Editar</button><button class="row-action delete" data-delete-user="${user.id}">Apagar</button>` : ""}</div></td>
     </tr>`;
   });
@@ -977,6 +1280,7 @@ function renderVacations() {
       <td><span class="status ${cls(item.status)}">${esc(item.status)}</span></td>
       <td><div class="row-actions">${role() !== "Funcionario" ? `<button class="row-action" data-edit-vacation="${item.id}">Editar</button><button class="row-action approve" data-approve-vacation="${item.id}">Aprovar</button><button class="row-action delete" data-reject-vacation="${item.id}">Rejeitar</button>` : ""}</div></td>
     </tr>`);
+  renderVacationMap();
 }
 
 function renderAbsences() {
@@ -991,6 +1295,254 @@ function renderAbsences() {
       <td><strong>${esc(item.compensateVacation === "Sim" ? "Compensada com férias" : "Sem compensação")}</strong><small>${esc(item.reason || "Sem motivo")}</small></td>
       <td><div class="row-actions">${role() !== "Funcionario" ? `<button class="row-action" data-edit-absence="${item.id}">Editar</button><button class="row-action approve" data-approve-absence="${item.id}">Validar</button><button class="row-action delete" data-reject-absence="${item.id}">Rejeitar</button>` : ""}</div></td>
     </tr>`);
+}
+
+function renderVacationMap() {
+  const dialog = qs("#vacationMapDialog");
+  const openButton = qs("#openVacationMapButton");
+  const host = qs("#vacationMap");
+  if (openButton) openButton.hidden = !(!isClient() && ["Admin", "RH"].includes(role()));
+  if (!dialog || !host) return;
+  const visible = !isClient() && ["Admin", "RH"].includes(role());
+  if (!visible) {
+    host.innerHTML = "";
+    return;
+  }
+  const teamFilter = qs("#vacationMapTeamFilter");
+  if (teamFilter) {
+    const currentValue = teamFilter.value;
+    const teams = vacationMapTeams();
+    teamFilter.innerHTML = `<option value="">Todas as equipas</option>${teams.map((team) => `<option value="${esc(team)}" ${currentValue === team ? "selected" : ""}>${esc(team)}</option>`).join("")}`;
+  }
+  host.innerHTML = buildVacationMapHtml();
+}
+
+function buildVacationMapHtml() {
+  const records = vacationMapRecords(vacationMapFilters());
+
+  return `
+    <div class="vacation-map-card">
+      <div class="vacation-map-header">
+        <div class="vacation-map-meta">
+          <strong>Duomold - Fábrica de Moldes, Lda.</strong>
+          <small>Rua do Sobral, 585 - Pavilhão 1 - 3720-602 Oliveira de Azeméis</small>
+          <small>Local trabalho: Global</small>
+        </div>
+      </div>
+      ${buildVacationLegendHtml()}
+      <div class="vacation-map-grid">
+        ${vacationMapMonths.map((monthName, monthIndex) => buildVacationMonthHtml(monthName, monthIndex, records)).join("")}
+      </div>
+    </div>
+  `;
+}
+
+function buildVacationLegendHtml() {
+  return `
+    <div class="vacation-excel-legend" aria-label="Legenda do mapa de férias">
+      <div class="vacation-excel-legend-title">Legenda:</div>
+      ${vacationLegendItems.map((item) => `
+        <div class="vacation-excel-legend-code ${item.className}">${esc(item.code)}</div>
+        <div class="vacation-excel-legend-label">${esc(item.label)}</div>
+      `).join("")}
+    </div>
+  `;
+}
+
+function buildVacationMonthHtml(monthName, monthIndex, records) {
+  const daysInMonth = new Date(vacationMapYear, monthIndex + 1, 0).getDate();
+  const monthStart = isoDate(vacationMapYear, monthIndex + 1, 1);
+  const monthEnd = isoDate(vacationMapYear, monthIndex + 1, daysInMonth);
+  const monthRecords = records.filter((item) => String(item.startDate).localeCompare(monthEnd) <= 0 && String(item.endDate).localeCompare(monthStart) >= 0);
+
+  return `
+    <section class="vacation-month-card">
+      <div class="vacation-map-scroll">
+        ${buildVacationExcelMonthTable(monthName, monthIndex, records)}
+      </div>
+    </section>
+  `;
+}
+
+function vacationMapPeople(filters = vacationMapFilters(), records = []) {
+  const recordUserIds = new Set(records.map((item) => item.userId));
+  return state.users
+    .filter((user) => user.status !== "Inativo")
+    .filter((user) => user.role === "Funcionario" || recordUserIds.has(user.id))
+    .filter((user) => !filters.team || (user.department || "Sem equipa") === filters.team)
+    .filter((user) => {
+      if (!filters.query) return true;
+      const userText = [user.name, user.department, user.position, user.employeeNumber, user.role].join(" ").toLowerCase();
+      const recordText = records
+        .filter((item) => item.userId === user.id)
+        .map((item) => [item.origin, item.status, item.notes, vacationCode(item)].join(" "))
+        .join(" ")
+        .toLowerCase();
+      return `${userText} ${recordText}`.includes(filters.query);
+    })
+    .sort((a, b) => String(a.name || "").localeCompare(String(b.name || ""), "pt"));
+}
+
+function vacationMapCellInfo(userId, iso, monthRecords) {
+  const item = monthRecords.find((record) => record.userId === userId && iso >= record.startDate && iso <= record.endDate);
+  if (item) {
+    const code = vacationCode(item);
+    return {
+      value: code,
+      className: `code-${String(code).toLowerCase()}`,
+      title: `${userName(userId)} - ${date(iso)} - ${vacationCodeLabel(code)}`
+    };
+  }
+  if (isWeekend(iso)) {
+    return {
+      value: "N",
+      className: "weekend",
+      title: `${userName(userId)} - ${date(iso)} - Fim-de-semana`
+    };
+  }
+  return { value: "", className: "", title: `${userName(userId)} - ${date(iso)}` };
+}
+
+function buildVacationExcelMonthTable(monthName, monthIndex, records, options = {}) {
+  const filters = vacationMapFilters();
+  const daysInMonth = new Date(vacationMapYear, monthIndex + 1, 0).getDate();
+  const monthStart = isoDate(vacationMapYear, monthIndex + 1, 1);
+  const monthEnd = isoDate(vacationMapYear, monthIndex + 1, daysInMonth);
+  const monthRecords = records.filter((item) => String(item.startDate).localeCompare(monthEnd) <= 0 && String(item.endDate).localeCompare(monthStart) >= 0);
+  const people = vacationMapPeople(filters, records);
+  const weekdays = Array.from({ length: daysInMonth }, (_, index) => {
+    const iso = isoDate(vacationMapYear, monthIndex + 1, index + 1);
+    return `<th class="excel-weekday ${isWeekend(iso) ? "weekend" : ""}">${esc(vacationWeekdayLabel(iso))}</th>`;
+  }).join("");
+  const dayHeaders = Array.from({ length: daysInMonth }, (_, index) => {
+    const iso = isoDate(vacationMapYear, monthIndex + 1, index + 1);
+    return `<th class="excel-day-head ${isWeekend(iso) ? "weekend" : ""}">${index + 1}</th>`;
+  }).join("");
+  const rows = people.map((user) => {
+    const cells = Array.from({ length: daysInMonth }, (_, index) => {
+      const iso = isoDate(vacationMapYear, monthIndex + 1, index + 1);
+      const cell = vacationMapCellInfo(user.id, iso, monthRecords);
+      const label = cell.value === "N" ? "N" : index + 1;
+      return `<td class="excel-day-cell ${cell.className}" title="${esc(cell.title)}">${esc(label)}</td>`;
+    }).join("");
+    return `
+      <tr>
+        <td class="excel-person-cell">${esc(user.name || "Sem colaborador")}</td>
+        ${cells}
+      </tr>
+    `;
+  }).join("");
+  const monthRowspan = people.length ? people.length + 2 : 3;
+
+  return `
+    <table class="vacation-excel-month ${options.printable ? "printable" : ""}">
+      <colgroup>
+        <col class="excel-month-col">
+        <col class="excel-person-col">
+        ${Array.from({ length: daysInMonth }, () => `<col class="excel-day-col">`).join("")}
+      </colgroup>
+      <tbody>
+        <tr>
+          <th class="excel-month-cell" rowspan="${monthRowspan}">${esc(monthName)}</th>
+          <th class="excel-workplace-cell">Local trabalho:</th>
+          ${weekdays}
+        </tr>
+        <tr>
+          <th class="excel-filter-cell"><span></span></th>
+          ${dayHeaders}
+        </tr>
+        ${rows || `<tr><td class="excel-person-cell empty" colspan="${daysInMonth + 1}">Sem colaboradores.</td></tr>`}
+      </tbody>
+    </table>
+  `;
+}
+
+function vacationMapFilters() {
+  const queryRaw = qs("#vacationMapSearch")?.value || "";
+  return {
+    queryRaw,
+    query: queryRaw.trim().toLowerCase(),
+    team: qs("#vacationMapTeamFilter")?.value || "",
+    code: qs("#vacationMapCodeFilter")?.value || ""
+  };
+}
+
+function vacationMapRecords(filters = {}) {
+  return state.vacations
+    .filter((item) => item.status === "Aprovado")
+    .filter((item) => item.startDate && item.endDate)
+    .filter((item) => overlapsVacationYear(item))
+    .filter((item) => {
+      const team = vacationTeamName(item.userId);
+      if (filters.team && team !== filters.team) return false;
+      const code = vacationCode(item);
+      if (filters.code && code !== filters.code) return false;
+      if (!filters.query) return true;
+      const haystack = [userName(item.userId), team, item.origin, item.status, item.notes, code, item.days].join(" ").toLowerCase();
+      return haystack.includes(filters.query);
+    })
+    .sort((a, b) => String(a.startDate).localeCompare(String(b.startDate)) || userName(a.userId).localeCompare(userName(b.userId)));
+}
+
+function vacationTeamName(userId) {
+  return state.users.find((user) => user.id === userId)?.department || "Sem equipa";
+}
+
+function vacationCode(item) {
+  return deriveVacationCode(item);
+}
+
+function vacationCodeLabel(code) {
+  return { F: "F - Férias", BG: "BG - Banco de Horas", DC: "DC - Descanso Compensatório" }[code] || code;
+}
+
+function vacationMapTeams() {
+  return [...new Set(state.users.map((user) => user.department || "").filter(Boolean))].sort((a, b) => a.localeCompare(b, "pt"));
+}
+
+function vacationMapSummary(records) {
+  return {
+    total: records.length,
+    f: records.filter((item) => vacationCode(item) === "F").length,
+    bg: records.filter((item) => vacationCode(item) === "BG").length,
+    dc: records.filter((item) => vacationCode(item) === "DC").length,
+    days: records.reduce((total, item) => total + Number(item.days || 0), 0)
+  };
+}
+
+function overlapsVacationYear(item) {
+  const start = String(item.startDate || "");
+  const end = String(item.endDate || "");
+  const yearStart = isoDate(vacationMapYear, 1, 1);
+  const yearEnd = isoDate(vacationMapYear, 12, 31);
+  return start <= yearEnd && end >= yearStart;
+}
+
+function isoDate(year, month, day) {
+  return `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+}
+
+function maxIso(a, b) {
+  return String(a || "").localeCompare(String(b || "")) >= 0 ? String(a || "") : String(b || "");
+}
+
+function minIso(a, b) {
+  return String(a || "").localeCompare(String(b || "")) <= 0 ? String(a || "") : String(b || "");
+}
+
+function isWeekend(iso) {
+  const day = new Date(`${iso}T00:00:00`).getDay();
+  return day === 0 || day === 6;
+}
+
+function vacationWeekdayLabel(iso) {
+  return vacationWeekdays[new Date(`${iso}T00:00:00`).getDay()];
+}
+
+function statusClass(status) {
+  if (status === "Aprovado") return "approved";
+  if (status === "Pendente") return "pending";
+  return "rejected";
 }
 
 function openDialog(mode, id = null, defaults = {}) {
@@ -1018,15 +1570,15 @@ function dialogTitle(mode, editing) {
 }
 
 function dialogSubtitle(mode) {
-  if (mode === "profileUser" || mode === "profileClient") return "Atualize as informaÃ§Ãµes do perfil atual.";
+  if (mode === "profileUser" || mode === "profileClient") return "Atualize as informações do perfil atual.";
   if (mode === "client") return "Preencha os dados do cliente e da empresa na mesma ficha.";
-  if (mode === "vacation") return "Escolha as datas. O sistema calcula os dias úteis e limita cada pedido a 15 dias.";
+  if (mode === "vacation") return `Escolha as datas. O sistema calcula os dias úteis e limita cada pedido a ${maxVacationRequestDays} dias.`;
   if (mode === "absence") return "Registe a falta e indique se ela deve ser compensada com 1 dia de férias.";
   return "Preencha os dados principais.";
 }
 
 function fieldHtml([name, labelText, type, required], record) {
-  const valueText = record[name] || "";
+  const valueText = name === "mapCode" && dialogMode === "vacation" && !record[name] ? "F" : record[name] || "";
   const req = required ? "required" : "";
   if (type === "textarea") return `<label class="field full"><span>${labelText}</span><textarea name="${name}" ${req}>${esc(valueText)}</textarea></label>`;
   if (type === "company") return selectField(name, labelText, state.companies.map((item) => [item.id, item.name]), valueText, req);
@@ -1050,7 +1602,7 @@ function orderHistoryField(record) {
       <div class="order-history-header">
         <div>
           <span>Historico da encomenda</span>
-          <small>Regista alteracoes, combinados com o cliente e mudancas de estado.</small>
+          <small>Regista apenas as observacoes inseridas pelo Admin.</small>
         </div>
       </div>
       <div class="order-history-inputs">
@@ -1063,23 +1615,49 @@ function orderHistoryField(record) {
           <textarea name="historyNote" placeholder="Ex: Cliente ficou de enviar o 3D peca final em 21-05-2026."></textarea>
         </label>
       </div>
-      <div class="order-history-list">
-        ${history.length ? history.map((entry) => orderHistoryItemHtml(entry)).join("") : `<p class="photo-empty">Ainda sem historico registado.</p>`}
+      <div class="order-history-list" id="orderHistoryList">
+        ${history.length ? history.map((entry) => orderHistoryItemHtml(entry, record.id)).join("") : `<p class="photo-empty">Ainda sem historico registado.</p>`}
       </div>
     </section>`;
 }
 
-function orderHistoryItemHtml(entry) {
+function orderHistoryItemHtml(entry, orderId = "") {
   const details = Array.isArray(entry.details) ? entry.details : entry.details ? [entry.details] : [];
   return `
     <article class="order-history-item">
       <div class="order-history-top">
         <strong>${esc(date(entry.at || entry.date || today()))}</strong>
+        <span class="status ${cls(entry.status || "Falta")} order-history-status">${esc(entry.status || "Falta")}</span>
         <span>${esc(entry.by || "Sistema")}</span>
       </div>
-      <div class="order-history-summary">${esc(entry.summary || "Registo")}</div>
+      <div class="order-history-body">
+        <div class="order-history-summary">${esc(entry.summary || "Registo")}</div>
+        <label class="order-history-check-option">
+          <input data-order-history-toggle data-order-id="${esc(orderId || entry.orderId || "")}" data-history-id="${esc(entry.id || "")}" type="checkbox" ${String(entry.status || "Falta") === "Entregue" ? "checked" : ""}>
+          <span>Marcado como Entregue</span>
+        </label>
+      </div>
       ${details.length ? `<ul>${details.map((detail) => `<li>${esc(detail)}</li>`).join("")}</ul>` : ""}
     </article>`;
+}
+
+function refreshOrderHistoryList(orderId) {
+  const order = state.orders.find((item) => item.id === orderId);
+  if (!order) return;
+  const list = qs("#orderHistoryList");
+  if (!list) return;
+  const history = Array.isArray(order.history) ? order.history : [];
+  list.innerHTML = history.length ? history.map((entry) => orderHistoryItemHtml(entry, order.id)).join("") : `<p class="photo-empty">Ainda sem historico registado.</p>`;
+}
+
+function toggleOrderHistoryStatus(orderId, historyId, delivered) {
+  const order = state.orders.find((item) => item.id === orderId);
+  if (!order || !Array.isArray(order.history)) return;
+  const entry = order.history.find((item) => item.id === historyId);
+  if (!entry) return;
+  entry.status = delivered ? "Entregue" : "Falta";
+  saveState();
+  refreshOrderHistoryList(orderId);
 }
 
 function selectField(name, labelText, options, valueText, req) {
@@ -1226,22 +1804,31 @@ function handleSubmit(event) {
   }
   if (dialogMode === "vacation") {
     if (role() === "Funcionario") data.origin = "Funcionario";
+    if (!editingId && ["Admin", "RH"].includes(role()) && data.userId === currentUser()?.id) data.status = "Pendente";
+    data.mapCode = deriveVacationCode(data);
     const validation = validateVacation(data);
     if (!validation.ok) {
       qs("#formAlert").textContent = validation.message;
       return;
     }
     data.days = String(validation.days);
+    if (data.status !== "Pendente") {
+      data.decidedBy = currentUser()?.name || "Admin/RH";
+      data.decidedById = currentUser()?.id || "";
+      data.decidedAt = new Date().toISOString();
+    }
   }
   if (dialogMode === "absence") {
+    const wasEditingAbsence = Boolean(editingId);
     data.attachments = cloneAttachments(dialogAttachments);
     const existingCompensation = editingId && state.vacations.some((item) => item.linkedAbsenceId === editingId);
     const usedForCompensation = vacationDaysUsed(data.userId) - (existingCompensation ? 1 : 0);
-    if (data.compensateVacation === "Sim" && data.status !== "Rejeitado" && usedForCompensation + 1 > 30) {
-      qs("#formAlert").textContent = "Não é possível compensar com férias porque o colaborador já atingiu o limite anual de 30 dias.";
+    if (data.compensateVacation === "Sim" && data.status !== "Rejeitado" && usedForCompensation + 1 > annualVacationDays) {
+      qs("#formAlert").textContent = "Não é possível compensar com férias porque o colaborador já atingiu o limite anual de 22 dias.";
       return;
     }
-    saveAbsenceWithCompensation(data);
+    const savedAbsence = saveAbsenceWithCompensation(data);
+    if (!wasEditingAbsence) notifyAbsenceRequest(savedAbsence);
     qs("#recordDialog").close();
     saveState();
     return;
@@ -1264,7 +1851,7 @@ function handleSubmit(event) {
     delete savedRecord.historyNote;
   }
   if (dialogMode === "order") notifyOrderChange(savedRecord, wasEditing);
-  if (dialogMode === "vacation") notifyVacationRequest(savedRecord);
+  if (dialogMode === "vacation" && !wasEditing) notifyVacationRequest(savedRecord);
   qs("#recordDialog").close();
   saveState();
 }
@@ -1272,45 +1859,17 @@ function handleSubmit(event) {
 function applyOrderHistory(order, previousRecord, historyDate, manualNote, wasEditing) {
   if (!order) return;
   if (!Array.isArray(order.history)) order.history = [];
-  const details = [];
-  const fields = [
-    ["status", "Estado", formatOrderHistoryValue],
-    ["progress", "Progresso (%)", (value) => `${value || "0"}%`],
-    ["dueDate", "Previsao de entrega", (value) => (value ? date(value) : "Sem data")],
-    ["weeklyUpdate", "Atualizacao semanal", (value) => value || "Vazio"],
-    ["tasks", "Tarefas internas", (value) => value || "Vazio"],
-    ["title", "Titulo", (value) => value || "Vazio"],
-    ["description", "Descricao", (value) => value || "Vazio"],
-    ["showPlanningToClient", "Planeamento visivel ao cliente", (value) => value || "Sim"],
-    ["showScheduleToClient", "Cronograma visivel ao cliente", (value) => value || "Sim"]
-  ];
-
-  fields.forEach(([key, label, formatter]) => {
-    const before = previousRecord ? formatter(previousRecord[key]) : null;
-    const after = formatter(order[key]);
-    if (!previousRecord) {
-      details.push(`${label}: ${after}`);
-      return;
-    }
-    if (before !== after) details.push(`${label}: ${before} -> ${after}`);
-  });
-
-  if (manualNote) details.push(`Nota manual: ${manualNote}`);
-  if (!previousRecord && !details.length) details.push("Criacao da encomenda");
-  if (wasEditing && !details.length && manualNote) details.push(`Nota manual: ${manualNote}`);
-  if (!details.length) return;
+  if (!manualNote) return;
 
   order.history.unshift({
     id: `order-history-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+    orderId: order.id,
     at: historyDate || today(),
     by: currentUser()?.name || "Sistema",
-    summary: previousRecord ? "Atualizacao da encomenda" : "Encomenda criada",
-    details
+    status: "Falta",
+    summary: "Observação da encomenda",
+    details: [manualNote]
   });
-}
-
-function formatOrderHistoryValue(value) {
-  return value ? String(value) : "Vazio";
 }
 
 function clientFormRecord(client) {
@@ -1394,24 +1953,25 @@ function handlePasswordSubmit(event) {
     return;
   }
   record.password = data.newPassword;
-  localStorage.setItem(storageKey, JSON.stringify(state));
+  saveState();
   qs("#passwordDialog").close();
   alert("Senha alterada com sucesso.");
 }
 
 function notifyVacationRequest(vacation) {
-  if (!vacation || vacation.origin !== "Funcionario" || vacation.status !== "Pendente") return;
-  notifyWithAdminCopy({
-    to: "role:RH",
+  if (!vacation || vacation.status !== "Pendente") return;
+  const employee = userName(vacation.userId);
+  notifyMany(managerNotificationTargets(vacation.userId), {
     title: "Novo pedido de férias",
-    message: `${userName(vacation.userId)} pediu férias de ${date(vacation.startDate)} a ${date(vacation.endDate)}.`,
-    link: "vacations"
+    message: `${employee} pediu férias de ${date(vacation.startDate)} a ${date(vacation.endDate)}.`,
+    link: "vacations",
+    recordType: "vacation",
+    recordId: vacation.id
   });
   const recipients = state.users
-    .filter((user) => ["Admin", "RH"].includes(user.role) && user.email)
+    .filter((user) => managerNotificationTargets(vacation.userId).includes(`role:${user.role}`) && user.email)
     .map((user) => user.email);
   if (!recipients.length) return;
-  const employee = userName(vacation.userId);
   const subject = `Pedido de férias pendente - ${employee}`;
   const body = [
     "Olá,",
@@ -1434,14 +1994,39 @@ function notifyVacationRequest(vacation) {
   }, 150);
 }
 
+function notifyAbsenceRequest(absence) {
+  if (!absence || absence.status !== "Pendente") return;
+  const employee = userName(absence.userId);
+  notifyMany(managerNotificationTargets(absence.userId), {
+    title: "Nova falta pendente",
+    message: `${employee} registou falta em ${date(absence.date)}.`,
+    link: "absences",
+    recordType: "absence",
+    recordId: absence.id
+  });
+}
+
 function notifyOrderChange(order, wasEditing) {
   if (!order?.clientId) return;
-  notifyWithAdminCopy({
+  addNotification({
     to: `client:${order.clientId}`,
-    title: wasEditing ? "Encomenda atualizada" : "Nova encomenda criada",
-    message: `${order.reference}: ${order.weeklyUpdate || order.status || "Consulte a atualização no sistema."}`,
-    link: isClient() ? "clientPortal" : "orders"
+    title: "Encomenda atualizada",
+    message: order.reference || "Sem número de encomenda",
+    link: "clientPortal",
+    recordType: "order",
+    recordId: order.id
   });
+}
+
+function scheduleOrderClientNotification(order) {
+  if (!order?.id || !order.clientId || isClient()) return;
+  clearTimeout(orderNotificationTimers.get(order.id));
+  orderNotificationTimers.set(order.id, setTimeout(() => {
+    orderNotificationTimers.delete(order.id);
+    notifyOrderChange(order, true);
+    persistStateOnly();
+    renderNotifications();
+  }, 1200));
 }
 
 function setupDialogRules(mode) {
@@ -1472,30 +2057,40 @@ function updateVacationCalculation() {
     return;
   }
   end.min = start.value;
-  end.max = addDays(start.value, 14);
+  end.max = addDays(start.value, maxVacationRequestDays - 1);
   if (!end.value || end.value < start.value) end.value = start.value;
   if (end.value > end.max) end.value = end.max;
   let total = businessDays(start.value, end.value);
-  while (total > 15) {
+  while (total > maxVacationRequestDays) {
     end.value = addDays(end.value, -1);
     total = businessDays(start.value, end.value);
   }
   days.value = total || "";
   const used = vacationDaysUsed(form.elements.userId.value, editingId);
-  const remaining = Math.max(30 - used - total, 0);
-  if (hint) hint.textContent = `Total deste pedido: ${total} dias úteis. Já usados/pendentes: ${used}/30. Restam após este pedido: ${remaining}.`;
+  const remaining = Math.max(annualVacationDays - used - total, 0);
+  if (hint) hint.textContent = `Total deste pedido: ${total} dias úteis. Já usados/pendentes: ${used}/${annualVacationDays}. Restam após este pedido: ${remaining}.`;
 }
 
 function validateVacation(data) {
   const days = businessDays(data.startDate, data.endDate);
   if (!data.startDate || !data.endDate) return { ok: false, message: "Preencha a data inicial e a data final." };
   if (new Date(data.endDate) < new Date(data.startDate)) return { ok: false, message: "A data final não pode ser anterior à data inicial." };
-  if (data.endDate > addDays(data.startDate, 14)) return { ok: false, message: "A data final pode ir apenas até 15 dias corridos a partir da data inicial." };
+  if (data.endDate > addDays(data.startDate, maxVacationRequestDays - 1)) return { ok: false, message: `A data final pode ir apenas até ${maxVacationRequestDays} dias corridos a partir da data inicial.` };
   if (days < 1) return { ok: false, message: "O período precisa ter pelo menos 1 dia útil." };
-  if (days > 15) return { ok: false, message: "Cada pedido de férias pode ter no máximo 15 dias úteis a partir da data inicial." };
+  if (days > maxVacationRequestDays) return { ok: false, message: `Cada pedido de férias pode ter no máximo ${maxVacationRequestDays} dias úteis a partir da data inicial.` };
   const used = vacationDaysUsed(data.userId, editingId);
-  if (used + days > 30) return { ok: false, message: `Este colaborador já tem ${used} dias usados/pendentes. O limite anual é 30 dias.` };
+  if (used + days > annualVacationDays) return { ok: false, message: `Este colaborador já tem ${used} dias usados/pendentes. O limite anual é ${annualVacationDays} dias.` };
   return { ok: true, days };
+}
+
+function deriveVacationCode(data = {}) {
+  const candidate = String(data.mapCode || data.code || "").toUpperCase().trim();
+  if (["F", "BG", "DC"].includes(candidate)) return candidate;
+  if (String(data.origin || "").toLowerCase().includes("compensa")) return "DC";
+  if (String(data.origin || "").toLowerCase().includes("banco")) return "BG";
+  if (String(data.notes || "").toLowerCase().includes("compensa")) return "DC";
+  if (String(data.notes || "").toLowerCase().includes("banco")) return "BG";
+  return "F";
 }
 
 function vacationDaysUsed(userId, ignoreId = null) {
@@ -1536,10 +2131,13 @@ function saveAbsenceWithCompensation(data) {
   else target.push(record);
 
   syncAbsenceCompensation(record);
+  return record;
 }
 
 function syncAbsenceCompensation(absence) {
+  const removed = state.vacations.filter((item) => item.linkedAbsenceId === absence.id);
   state.vacations = state.vacations.filter((item) => item.linkedAbsenceId !== absence.id);
+  removed.forEach((item) => void deleteSupabaseRecord("vacations", item.id));
   if (absence.compensateVacation !== "Sim" || absence.status === "Rejeitado") return;
   const status = absence.status === "Aprovado" ? "Aprovado" : "Pendente";
   state.vacations.push({
@@ -1578,6 +2176,8 @@ function deleteRecord(mode, id) {
   const key = { client: "clients", company: "companies", order: "orders", user: "users", vacation: "vacations", absence: "absences" }[mode];
   state[key] = state[key].filter((item) => item.id !== id);
   if (mode === "absence") state.vacations = state.vacations.filter((item) => item.linkedAbsenceId !== id);
+  const tableName = { client: "clients", company: "companies", order: "orders", user: "users", vacation: "vacations", absence: "absences" }[mode];
+  void deleteSupabaseRecord(tableName, id);
   saveState();
 }
 
@@ -1586,20 +2186,713 @@ function approve(mode, id, status) {
   if (!item) return;
   item.status = status;
   item.decidedBy = currentUser()?.name || "Admin";
+  item.decidedById = currentUser()?.id || "";
+  item.decidedAt = new Date().toISOString();
   if (mode === "absence") syncAbsenceCompensation(item);
-  if (mode === "vacation") notifyWithAdminCopy({
+  if (mode === "vacation") addNotification({
     to: `user:${item.userId}`,
     title: `Pedido de férias ${status.toLowerCase()}`,
-    message: `O seu pedido de ${date(item.startDate)} a ${date(item.endDate)} foi ${status.toLowerCase()}.`,
-    link: "vacations"
+    message: `${userName(item.userId)}, o seu pedido de ${date(item.startDate)} a ${date(item.endDate)} foi ${status.toLowerCase()} por ${currentUser()?.name || "Admin/RH"}.`,
+    link: "vacations",
+    recordType: "vacation",
+    recordId: item.id
   });
-  if (mode === "absence") notifyWithAdminCopy({
+  if (mode === "absence") addNotification({
     to: `user:${item.userId}`,
     title: `Falta ${status.toLowerCase()}`,
-    message: `A sua falta de ${date(item.date)} foi ${status.toLowerCase()}.`,
-    link: "absences"
+    message: `${userName(item.userId)}, a sua falta de ${date(item.date)} foi ${status.toLowerCase()} por ${currentUser()?.name || "Admin/RH"}.`,
+    link: "absences",
+    recordType: "absence",
+    recordId: item.id
   });
   saveState();
+}
+
+function openVacationMapDialog() {
+  if (isClient() || !["Admin", "RH"].includes(role())) return;
+  renderVacationMap();
+  qs("#vacationMapDialog")?.showModal();
+}
+
+function printVacationMap() {
+  if (isClient() || !["Admin", "RH"].includes(role())) return;
+  renderVacationMap();
+  const dialog = qs("#vacationMapDialog");
+  if (dialog && !dialog.open) dialog.showModal();
+  document.body.classList.add("printing-vacation-map");
+  setTimeout(() => {
+    window.print();
+    setTimeout(() => document.body.classList.remove("printing-vacation-map"), 250);
+  }, 50);
+}
+
+function exportVacationMapExcel() {
+  const records = vacationMapRecords(vacationMapFilters());
+  const html = buildVacationMapExcelHtml(records);
+  const blob = new Blob([html], { type: "application/vnd.ms-excel;charset=utf-8" });
+  const link = document.createElement("a");
+  link.href = URL.createObjectURL(blob);
+  link.download = `mapa-ferias-${vacationMapYear}.xls`;
+  link.click();
+  setTimeout(() => URL.revokeObjectURL(link.href), 1000);
+}
+
+function exportVacationMapPdf() {
+  downloadVacationMapPdf();
+}
+
+async function exportCurrentViewPdf() {
+  const { jsPDF } = window.jspdf || {};
+  const activeView = qs(".view.active");
+  if (typeof window.html2canvas !== "function" || !jsPDF || !activeView) {
+    alert("Não foi possível gerar o PDF nesta página.");
+    return;
+  }
+
+  const button = qs("#exportButton");
+  const previousText = button.textContent;
+  button.disabled = true;
+  button.textContent = "A gerar PDF...";
+
+  const source = document.createElement("section");
+  source.className = "pdf-export-sheet";
+  source.innerHTML = `
+    <header class="pdf-export-header">
+      <strong>DUOMOLD</strong>
+      <h1>${esc(titles[currentView]?.[0] || "Documento")}</h1>
+      <p>${esc(titles[currentView]?.[1] || "")}</p>
+      <small>Exportado em ${dateTime(new Date().toISOString())}</small>
+    </header>
+    <div class="pdf-export-body">${activeView.cloneNode(true).outerHTML}</div>
+  `;
+  document.body.appendChild(source);
+
+  try {
+    const canvas = await window.html2canvas(source, {
+      scale: 2,
+      backgroundColor: "#ffffff",
+      useCORS: true,
+      windowWidth: Math.max(source.scrollWidth, 1200)
+    });
+    const doc = new jsPDF({ orientation: "landscape", unit: "mm", format: "a4", compress: true });
+    const pageWidth = doc.internal.pageSize.getWidth();
+    const pageHeight = doc.internal.pageSize.getHeight();
+    const imgWidth = pageWidth;
+    const imgHeight = (canvas.height * imgWidth) / canvas.width;
+    let remainingHeight = imgHeight;
+    let position = 0;
+    const imageData = canvas.toDataURL("image/png");
+
+    doc.addImage(imageData, "PNG", 0, position, imgWidth, imgHeight);
+    remainingHeight -= pageHeight;
+    while (remainingHeight > 0) {
+      position -= pageHeight;
+      doc.addPage();
+      doc.addImage(imageData, "PNG", 0, position, imgWidth, imgHeight);
+      remainingHeight -= pageHeight;
+    }
+    doc.save(`${slugify(titles[currentView]?.[0] || "pagina")}.pdf`);
+  } catch (error) {
+    console.warn("Nao foi possivel exportar PDF.", error);
+    alert("Não foi possível gerar o PDF desta página.");
+  } finally {
+    source.remove();
+    button.disabled = false;
+    button.textContent = previousText;
+  }
+}
+
+function slugify(value) {
+  return String(value || "documento")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "") || "documento";
+}
+
+function openVacationMapPrintableDocument() {
+  openVacationMapDialog();
+}
+
+async function downloadVacationMapPdf() {
+  if (isClient() || !["Admin", "RH"].includes(role())) return;
+  const { jsPDF } = window.jspdf || {};
+  if (typeof window.html2canvas !== "function" || !jsPDF) {
+    alert("As bibliotecas de PDF não carregaram corretamente.");
+    return;
+  }
+  const records = vacationMapRecords(vacationMapFilters());
+  const frame = document.createElement("iframe");
+  frame.setAttribute("aria-hidden", "true");
+  frame.style.position = "fixed";
+  frame.style.left = "-10000px";
+  frame.style.top = "0";
+  frame.style.width = "1600px";
+  frame.style.height = "1200px";
+  frame.style.border = "0";
+  frame.srcdoc = buildVacationMapPrintableHtml(records);
+  document.body.appendChild(frame);
+
+  try {
+    await new Promise((resolve, reject) => {
+      frame.addEventListener("load", resolve, { once: true });
+      frame.addEventListener("error", reject, { once: true });
+    });
+
+    const source = frame.contentDocument?.querySelector(".sheet") || frame.contentDocument?.body;
+    if (!source) throw new Error("Documento de impressão indisponível.");
+
+    const canvas = await window.html2canvas(source, {
+      scale: 2,
+      backgroundColor: "#ffffff",
+      useCORS: true,
+      windowWidth: 1600,
+      windowHeight: Math.max(source.scrollHeight, 1200)
+    });
+
+    const doc = new jsPDF({ orientation: "landscape", unit: "mm", format: "a4", compress: true });
+    const margin = 6;
+    const pageWidth = doc.internal.pageSize.getWidth();
+    const pageHeight = doc.internal.pageSize.getHeight();
+    const usableWidth = pageWidth - margin * 2;
+    const usableHeight = pageHeight - margin * 2;
+    const imgHeight = (canvas.height * usableWidth) / canvas.width;
+    const imgData = canvas.toDataURL("image/png");
+
+    let heightLeft = imgHeight;
+    let position = margin;
+    doc.addImage(imgData, "PNG", margin, position, usableWidth, imgHeight);
+    heightLeft -= usableHeight;
+
+    while (heightLeft > 0) {
+      position = heightLeft - imgHeight + margin;
+      doc.addPage();
+      doc.addImage(imgData, "PNG", margin, position, usableWidth, imgHeight);
+      heightLeft -= usableHeight;
+    }
+
+    doc.save(`mapa-ferias-${vacationMapYear}.pdf`);
+  } catch (error) {
+    console.error(error);
+    alert("Não foi possível gerar o PDF do mapa de férias.");
+  } finally {
+    frame.remove();
+  }
+}
+
+function buildVacationMapExcelHtml(records) {
+  const teams = vacationMapTeams();
+  const months = vacationMapMonths.map((monthName, monthIndex) => buildVacationMapExcelMonth(monthName, monthIndex, records)).join("");
+  return `<!doctype html>
+  <html>
+    <head>
+      <meta charset="utf-8">
+      <style>
+        body { font-family: Arial, sans-serif; color: #111; }
+        h1 { margin: 0 0 8px; }
+        h2 { margin: 24px 0 8px; }
+        table { border-collapse: collapse; width: 100%; margin-bottom: 18px; }
+        th, td { border: 1px solid #333; padding: 6px 8px; font-size: 11px; }
+        th { background: #f1f1f1; }
+        .code-f { background: #00b0f0; }
+        .code-bg { background: #dbeafe; }
+        .code-dc { background: #dcfce7; }
+        .weekend { background: #ffffff; font-weight: 700; text-align: center; }
+        .vacation-excel-legend { display: grid; grid-template-columns: 76px repeat(8, 28px minmax(112px, 1fr)); margin-bottom: 12px; border: 0; font-family: Calibri, Arial, sans-serif; font-size: 12px; }
+        .vacation-excel-legend-title, .vacation-excel-legend-code, .vacation-excel-legend-label { min-height: 18px; border-right: 1px solid #d9d9d9; border-bottom: 1px solid #d9d9d9; display: grid; align-items: center; }
+        .vacation-excel-legend-title { align-items: center; font-size: 13px; font-weight: 700; }
+        .vacation-excel-legend-code { justify-content: center; font-weight: 700; text-align: center; }
+        .vacation-excel-legend-label { justify-content: center; text-align: center; padding: 0 6px; }
+        .vacation-excel-legend-code.national-holiday { background: #b8cce4; }
+        .vacation-excel-legend-code.municipal-holiday { background: #c2d69b; }
+        .vacation-excel-legend-code.weekend { background: #ffffff; }
+        .vacation-excel-legend-code.vacation { background: #00b0f0; }
+        .vacation-excel-legend-code.blocked-day { background: #ff0000; }
+        .vacation-excel-legend-code.carnival { background: #ccc0d9; }
+        .vacation-excel-legend-code.previous-year { background: #e36d09; }
+        .vacation-excel-legend-code.half-day { background: #92cddc; }
+        .vacation-excel-month { width: max-content; min-width: 100%; border-collapse: collapse; table-layout: fixed; color: #000; font-family: Calibri, Arial, sans-serif; font-size: 11px; line-height: 1; }
+        .vacation-excel-month th, .vacation-excel-month td { height: 17px; min-height: 17px; border: 1px solid #2f75b5; padding: 0 3px; text-align: center; vertical-align: middle; font-weight: 700; color: #000; }
+        .vacation-excel-month .excel-month-col { width: 74px; }
+        .vacation-excel-month .excel-person-col { width: 194px; }
+        .vacation-excel-month .excel-day-col { width: 45px; }
+        .vacation-excel-month .excel-month-cell { background: #dbe5f1; font-weight: 400; text-transform: uppercase; }
+        .vacation-excel-month .excel-workplace-cell { border-color: #00b050; border-bottom-color: #2f75b5; background: #ffffff; text-align: left; font-weight: 400; }
+        .vacation-excel-month .excel-filter-cell { border-color: #00b050; border-top-color: #2f75b5; background: #f2f2f2; }
+        .vacation-excel-month .excel-weekday { background: #ffffff; font-size: 12px; font-weight: 700; }
+        .vacation-excel-month .excel-day-head, .vacation-excel-month .excel-day-cell { background: #ffffff; font-size: 12px; font-weight: 700; }
+        .vacation-excel-month .excel-person-cell { color: #c00000; background: #ffffff; text-align: center; font-weight: 400; }
+        .vacation-excel-month .excel-day-cell.code-f { background: #00b0f0; }
+        .vacation-excel-month .excel-day-cell.code-bg { background: #92cddc; }
+        .vacation-excel-month .excel-day-cell.code-dc { background: #e36d09; }
+        .vacation-excel-month .excel-day-cell.weekend { background: #ffffff; }
+      </style>
+    </head>
+    <body>
+      <h1>Mapa Férias ${vacationMapYear} - Global</h1>
+      <p>Empresa: Duomold - Fábrica de Moldes, Lda.</p>
+      <p>Equipas: ${esc(teams.join(", ") || "Sem equipas")}</p>
+      ${buildVacationLegendHtml()}
+      ${months}
+    </body>
+  </html>`;
+}
+
+function buildVacationMapPrintableHtml(records) {
+  const teams = vacationMapTeams();
+  const months = vacationMapMonths.map((monthName, monthIndex) => buildVacationMapPrintableMonth(monthName, monthIndex, records)).join("");
+  return `<!doctype html>
+  <html lang="pt">
+    <head>
+      <meta charset="UTF-8">
+      <meta name="viewport" content="width=device-width, initial-scale=1.0">
+      <title>Mapa de Férias ${vacationMapYear}</title>
+      <style>
+        :root {
+          color-scheme: light;
+          --ink: #101828;
+          --muted: #5b6575;
+          --line: #2b3648;
+          --head: #e8edf5;
+          --sheet: #ffffff;
+          --soft: #f7f9fc;
+          --approved: #dfeee2;
+          --pending: #fff0c9;
+          --f: #00b0f0;
+          --bg: #dce9ff;
+          --dc: #dff4e2;
+          --weekend: #ffffff;
+        }
+
+        @page {
+          size: A4 landscape;
+          margin: 6mm;
+        }
+
+        html, body {
+          margin: 0;
+          padding: 0;
+          background: #fff;
+          color: var(--ink);
+          font-family: Calibri, Arial, sans-serif;
+          -webkit-print-color-adjust: exact;
+          print-color-adjust: exact;
+        }
+
+        body {
+          font-size: 11px;
+        }
+
+        .sheet {
+          padding: 8px 10px 12px;
+        }
+
+        .header {
+          display: flex;
+          justify-content: space-between;
+          align-items: flex-start;
+          gap: 18px;
+          margin-bottom: 10px;
+        }
+
+        .header h1 {
+          margin: 0;
+          font-size: 20px;
+          line-height: 1.1;
+          letter-spacing: 0.4px;
+        }
+
+        .header p,
+        .header small {
+          display: block;
+          margin: 2px 0 0;
+          color: var(--muted);
+          line-height: 1.35;
+        }
+
+        .header .meta {
+          text-align: right;
+          max-width: 420px;
+        }
+
+        .summary {
+          display: grid;
+          grid-template-columns: repeat(6, minmax(0, 1fr));
+          gap: 8px;
+          margin-bottom: 10px;
+        }
+
+        .summary article {
+          border: 1px solid var(--line);
+          background: var(--soft);
+          padding: 6px 8px;
+        }
+
+        .summary span {
+          display: block;
+          color: var(--muted);
+          font-size: 10px;
+          line-height: 1.2;
+        }
+
+        .summary strong {
+          display: block;
+          margin-top: 2px;
+          font-size: 15px;
+          line-height: 1.1;
+        }
+
+        .vacation-excel-legend {
+          display: grid;
+          grid-template-columns: 76px repeat(8, 28px minmax(112px, 1fr));
+          align-items: stretch;
+          margin-bottom: 10px;
+          border: 0;
+          background: #ffffff;
+          color: #111111;
+          font-family: Calibri, Arial, sans-serif;
+          font-size: 10px;
+        }
+
+        .vacation-excel-legend-title,
+        .vacation-excel-legend-code,
+        .vacation-excel-legend-label {
+          min-height: 16px;
+          border-right: 1px solid #d9d9d9;
+          border-bottom: 1px solid #d9d9d9;
+          display: grid;
+          align-items: center;
+        }
+
+        .vacation-excel-legend-title {
+          align-items: center;
+          font-size: 11px;
+          font-weight: 700;
+        }
+
+        .vacation-excel-legend-code {
+          justify-content: center;
+          font-weight: 700;
+          text-align: center;
+        }
+
+        .vacation-excel-legend-label {
+          justify-content: center;
+          text-align: center;
+          padding: 0 4px;
+        }
+
+        .vacation-excel-legend-code.national-holiday {
+          background: #b8cce4;
+        }
+
+        .vacation-excel-legend-code.municipal-holiday {
+          background: #c2d69b;
+        }
+
+        .vacation-excel-legend-code.weekend {
+          background: #ffffff;
+        }
+
+        .vacation-excel-legend-code.vacation {
+          background: #00b0f0;
+        }
+
+        .vacation-excel-legend-code.blocked-day {
+          background: #ff0000;
+        }
+
+        .vacation-excel-legend-code.carnival {
+          background: #ccc0d9;
+        }
+
+        .vacation-excel-legend-code.previous-year {
+          background: #e36d09;
+        }
+
+        .vacation-excel-legend-code.half-day {
+          background: #92cddc;
+        }
+
+        .month {
+          break-after: page;
+          page-break-after: always;
+          margin-bottom: 10px;
+        }
+
+        .month:last-child {
+          break-after: auto;
+          page-break-after: auto;
+        }
+
+        .month-head {
+          display: flex;
+          justify-content: space-between;
+          gap: 12px;
+          align-items: baseline;
+          margin: 0 0 6px;
+        }
+
+        .month-head strong {
+          font-size: 14px;
+          letter-spacing: 0.3px;
+        }
+
+        .month-head small {
+          color: var(--muted);
+        }
+
+        .table-wrap {
+          border: 1px solid var(--line);
+          overflow: hidden;
+        }
+
+        table {
+          width: 100%;
+          border-collapse: collapse;
+          table-layout: fixed;
+          background: var(--sheet);
+          font-size: 9px;
+        }
+
+        .vacation-excel-month {
+          width: max-content;
+          min-width: 100%;
+          border-collapse: collapse;
+          table-layout: fixed;
+          color: #000000;
+          font-family: Calibri, Arial, sans-serif;
+          font-size: 9px;
+          line-height: 1;
+        }
+
+        .vacation-excel-month th,
+        .vacation-excel-month td {
+          height: 13px;
+          min-height: 13px;
+          border: 1px solid #2f75b5;
+          padding: 0 2px;
+          text-align: center;
+          vertical-align: middle;
+          font-weight: 700;
+          color: #000000;
+        }
+
+        .vacation-excel-month .excel-month-col { width: 54px; }
+        .vacation-excel-month .excel-person-col { width: 138px; }
+        .vacation-excel-month .excel-day-col { width: 25px; }
+        .vacation-excel-month .excel-month-cell {
+          background: #dbe5f1;
+          font-weight: 400;
+          text-transform: uppercase;
+        }
+        .vacation-excel-month .excel-workplace-cell {
+          border-color: #00b050;
+          border-bottom-color: #2f75b5;
+          background: #ffffff;
+          text-align: left;
+          font-weight: 400;
+        }
+        .vacation-excel-month .excel-filter-cell {
+          position: relative;
+          border-color: #00b050;
+          border-top-color: #2f75b5;
+          background: #f2f2f2;
+        }
+        .vacation-excel-month .excel-filter-cell span::after {
+          content: "";
+          position: absolute;
+          right: 4px;
+          top: 4px;
+          width: 0;
+          height: 0;
+          border-left: 3px solid transparent;
+          border-right: 3px solid transparent;
+          border-top: 5px solid #6aa84f;
+        }
+        .vacation-excel-month .excel-weekday,
+        .vacation-excel-month .excel-day-head,
+        .vacation-excel-month .excel-day-cell {
+          width: 25px;
+        }
+        .vacation-excel-month .excel-weekday {
+          height: 13px;
+          background: #ffffff;
+          font-size: 9px;
+          font-weight: 700;
+        }
+        .vacation-excel-month .excel-day-head,
+        .vacation-excel-month .excel-day-cell {
+          background: #ffffff;
+          font-size: 9px;
+          font-weight: 700;
+        }
+        .vacation-excel-month .excel-person-cell {
+          color: #c00000;
+          background: #ffffff;
+          text-align: center;
+          font-weight: 400;
+        }
+        .vacation-excel-month .excel-day-cell.code-f { background: #00b0f0; }
+        .vacation-excel-month .excel-day-cell.code-bg { background: #92cddc; }
+        .vacation-excel-month .excel-day-cell.code-dc { background: #e36d09; }
+        .vacation-excel-month .excel-day-cell.weekend { background: #ffffff; }
+
+        col.person { width: 140px; }
+        col.team { width: 96px; }
+        col.code { width: 48px; }
+        col.period { width: 112px; }
+        col.status { width: 68px; }
+        col.days { width: 34px; }
+        col.day { width: 15px; }
+
+        thead th {
+          border: 1px solid var(--line);
+          background: var(--head);
+          padding: 4px 2px;
+          text-align: center;
+          vertical-align: middle;
+          line-height: 1.05;
+          font-size: 8px;
+          font-weight: 800;
+        }
+
+        tbody td {
+          border: 1px solid var(--line);
+          vertical-align: top;
+          background: #fff;
+          padding: 4px 3px;
+        }
+
+        tbody tr:nth-child(even) td.person-cell,
+        tbody tr:nth-child(even) td.meta-cell {
+          background: #fafbfd;
+        }
+
+        td.person-cell strong {
+          display: block;
+          font-size: 9px;
+          line-height: 1.15;
+          margin-bottom: 2px;
+        }
+
+        td.person-cell small,
+        td.meta-cell small {
+          display: block;
+          color: var(--muted);
+          line-height: 1.2;
+        }
+
+        td.code-cell,
+        td.day-cell {
+          text-align: center;
+          vertical-align: middle;
+          padding: 0;
+        }
+
+        td.meta-cell {
+          font-size: 8px;
+        }
+
+        td.status-approved { background: var(--approved); }
+        td.status-pending { background: var(--pending); }
+
+        th.weekend,
+        td.weekend {
+          background: var(--weekend);
+        }
+
+        td.fill-f { background: var(--f); }
+        td.fill-bg { background: var(--bg); }
+        td.fill-dc { background: var(--dc); }
+
+        .code-label {
+          display: inline-block;
+          font-size: 7px;
+          line-height: 1;
+          font-weight: 800;
+          letter-spacing: 0.2px;
+        }
+
+        .empty {
+          padding: 12px;
+          color: var(--muted);
+          text-align: center;
+        }
+
+        .footer-note {
+          margin-top: 8px;
+          color: var(--muted);
+          font-size: 9px;
+        }
+
+        @media print {
+          .sheet {
+            padding: 0;
+          }
+        }
+      </style>
+    </head>
+    <body>
+      <main class="sheet">
+        <section class="header">
+          <div class="meta">
+            <strong>Duomold - Fábrica de Moldes, Lda.</strong>
+            <small>Rua do Sobral, 585 - Pavilhão 1 - 3720-602 Oliveira de Azeméis</small>
+            <small>Equipas: ${esc(teams.join(", ") || "Sem equipas")}</small>
+          </div>
+        </section>
+
+        ${buildVacationLegendHtml()}
+
+        ${months}
+        <p class="footer-note">Os dias são preenchidos automaticamente a partir dos pedidos aprovados no sistema.</p>
+      </main>
+    </body>
+  </html>`;
+}
+
+function buildVacationMapPrintableMonth(monthName, monthIndex, records) {
+  return `
+    <section class="month">
+      <div class="table-wrap">
+        ${buildVacationExcelMonthTable(monthName, monthIndex, records, { printable: true })}
+      </div>
+    </section>
+  `;
+}
+
+function buildVacationMapExcelMonth(monthName, monthIndex, records) {
+  return `
+    ${buildVacationExcelMonthTable(monthName, monthIndex, records)}
+    <br>`;
+}
+
+function buildVacationMapPdfLines(records) {
+  const lines = [
+    `DUOMOLD - Mapa de Férias ${vacationMapYear}`,
+    "Legenda: N = Feriado nacional / municipal / fim-de-semana | Azul = Férias | Vermelho = Dia a não marcar | Carnaval | Férias ano anterior / admissão | Meio-dia de férias",
+    ""
+  ];
+  vacationMapMonths.forEach((monthName, monthIndex) => {
+    const daysInMonth = new Date(vacationMapYear, monthIndex + 1, 0).getDate();
+    const monthStart = isoDate(vacationMapYear, monthIndex + 1, 1);
+    const monthEnd = isoDate(vacationMapYear, monthIndex + 1, daysInMonth);
+    const monthRecords = records.filter((item) => String(item.startDate).localeCompare(monthEnd) <= 0 && String(item.endDate).localeCompare(monthStart) >= 0);
+    lines.push(monthName);
+    if (!monthRecords.length) {
+      lines.push("  Sem registos");
+    } else {
+      monthRecords.forEach((item) => {
+        const rowStart = maxIso(item.startDate, monthStart);
+        const rowEnd = minIso(item.endDate, monthEnd);
+        lines.push(`  ${userName(item.userId)} | ${vacationTeamName(item.userId)} | ${vacationCodeLabel(vacationCode(item))} | ${date(rowStart)} - ${date(rowEnd)} | ${item.status} | ${item.days} dias`);
+      });
+    }
+    lines.push("");
+  });
+  return lines;
 }
 
 function openSchedule(orderId) {
@@ -1699,7 +2992,8 @@ function saveSchedule() {
     order.schedule[key] = field.type === "checkbox" || field.type === "radio" ? field.checked : field.value;
   });
   if (!order.schedule.moldNumber) order.schedule.moldNumber = order.reference;
-  localStorage.setItem(storageKey, JSON.stringify(state));
+  persistStateOnly();
+  scheduleOrderClientNotification(order);
 }
 
 function exportSchedule() {
@@ -1772,7 +3066,8 @@ function handlePhotoUpload(input) {
       src: reader.result,
       caption: ""
     });
-    localStorage.setItem(storageKey, JSON.stringify(state));
+    persistStateOnly();
+    scheduleOrderClientNotification(order);
     refreshDocument(context, order, readonly);
   };
   reader.readAsDataURL(file);
@@ -1784,14 +3079,16 @@ function savePhotoCaption(target) {
   const photo = moldPhotos(order).find((item) => item.id === target.dataset.photoCaption);
   if (!photo) return;
   photo.caption = target.value;
-  localStorage.setItem(storageKey, JSON.stringify(state));
+  persistStateOnly();
+  scheduleOrderClientNotification(order);
 }
 
 function deletePhoto(target) {
   const { order, readonly, context } = activeDocumentOrder(target);
   if (!order || readonly || !confirm("Remover esta foto?")) return;
   order.moldPhotos = moldPhotos(order).filter((item) => item.id !== target.dataset.photoDelete);
-  localStorage.setItem(storageKey, JSON.stringify(state));
+  persistStateOnly();
+  scheduleOrderClientNotification(order);
   refreshDocument(context, order, readonly);
 }
 
@@ -1938,13 +3235,14 @@ function activePlanning() {
 }
 
 function savePlanningField(target) {
-  const { data, readonly } = activePlanning();
+  const { order, data, readonly } = activePlanning();
   if (!data || readonly) return;
   const topField = target.dataset.planningField;
   if (topField) {
     data[topField] = target.value;
     if (topField === "data") {
-      localStorage.setItem(storageKey, JSON.stringify(state));
+      persistStateOnly();
+      scheduleOrderClientNotification(order);
       refreshPlanning();
       return;
     }
@@ -1962,14 +3260,16 @@ function savePlanningField(target) {
   }
   const extraIndex = target.dataset.planningExtra;
   if (rowIndex !== undefined && extraIndex !== undefined) data.linhas[rowIndex].extras[extraIndex] = target.value;
-  localStorage.setItem(storageKey, JSON.stringify(state));
+  persistStateOnly();
+  scheduleOrderClientNotification(order);
 }
 
 function refreshPlanning() {
   const { order, readonly } = activePlanning();
   if (!order) return;
   qs("#planningBody").innerHTML = planningHtml(order, readonly);
-  localStorage.setItem(storageKey, JSON.stringify(state));
+  persistStateOnly();
+  scheduleOrderClientNotification(order);
 }
 
 function addPlanningLine(type = "tarefa") {
@@ -2093,7 +3393,12 @@ function esc(valueText) {
   return String(valueText ?? "").replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;").replaceAll("'", "&#039;");
 }
 
-qsa(".nav-item").forEach((button) => button.addEventListener("click", () => setView(button.dataset.view)));
+qsa(".nav-item").forEach((button) => button.addEventListener("click", () => {
+  setView(button.dataset.view);
+  if (button.dataset.scrollTarget) {
+    setTimeout(() => qs(`#${button.dataset.scrollTarget}`)?.scrollIntoView({ behavior: "smooth", block: "start" }), 50);
+  }
+}));
 qsa("[data-view-jump]").forEach((button) => button.addEventListener("click", () => setView(button.dataset.viewJump)));
 qs("#demoAccountSelect").addEventListener("change", (event) => {
   state.activeAccount = event.target.value;
@@ -2111,12 +3416,19 @@ qs("#addUserButton").addEventListener("click", () => {
 qs("#addVacationButton").addEventListener("click", () => openDialog("vacation"));
 qs("#addAbsenceButton").addEventListener("click", () => openDialog("absence"));
 qs("#employeeVacationShortcut").addEventListener("click", () => openDialog("vacation"));
+qs("#openVacationMapButton")?.addEventListener("click", openVacationMapPrintableDocument);
+qs("#closeVacationMapButton")?.addEventListener("click", () => qs("#vacationMapDialog")?.close());
+qs("#vacationMapSearch")?.addEventListener("input", renderVacationMap);
+qs("#vacationMapTeamFilter")?.addEventListener("change", renderVacationMap);
+qs("#printVacationMapButton")?.addEventListener("click", printVacationMap);
+qs("#exportVacationMapPdfButton")?.addEventListener("click", exportVacationMapPdf);
+qs("#exportVacationMapExcelButton")?.addEventListener("click", exportVacationMapExcel);
 qs("#recordForm").addEventListener("submit", handleSubmit);
 qs("#closeDialogButton").addEventListener("click", () => qs("#recordDialog").close());
 qs("#cancelDialogButton").addEventListener("click", () => qs("#recordDialog").close());
 qs("#loginForm").addEventListener("submit", loginWithCredentials);
 qs("#logoutButton").addEventListener("click", logout);
-qs("#changePasswordButton").addEventListener("click", openPasswordDialog);
+qs("#changePasswordButton")?.addEventListener("click", openPasswordDialog);
 qs("#editProfileButton").addEventListener("click", openProfileDialog);
 qs("#profilePasswordButton").addEventListener("click", openPasswordDialog);
 qs("#passwordForm").addEventListener("submit", handlePasswordSubmit);
@@ -2126,13 +3438,7 @@ qs("#notificationButton").addEventListener("click", () => {
   qs("#notificationPanel").hidden = !qs("#notificationPanel").hidden;
 });
 qs("#markNotificationsReadButton").addEventListener("click", markNotificationsRead);
-qs("#exportButton").addEventListener("click", () => {
-  const blob = new Blob([JSON.stringify(state, null, 2)], { type: "application/json" });
-  const link = document.createElement("a");
-  link.href = URL.createObjectURL(blob);
-  link.download = "duomold-demo.json";
-  link.click();
-});
+qs("#exportButton").addEventListener("click", exportCurrentViewPdf);
 ["client", "company", "order", "user", "vacation", "absence"].forEach((name) => qs(`#${name}Search`)?.addEventListener("input", render));
 
 document.addEventListener("click", (event) => {
@@ -2196,6 +3502,10 @@ document.addEventListener("change", (event) => {
   }
   if (event.target.matches("[data-absence-attachment-upload]")) {
     handleAbsenceAttachmentUpload(event.target);
+    return;
+  }
+  if (event.target.matches("[data-order-history-toggle]")) {
+    toggleOrderHistoryStatus(event.target.dataset.orderId, event.target.dataset.historyId, event.target.checked);
     return;
   }
   if (event.target.closest("#scheduleDialog")) saveSchedule();
@@ -2340,7 +3650,8 @@ function buildPdfContentStream(lines, fontSize, lineHeight, marginLeft, startY) 
     .replace(/\(/g, "\\(")
     .replace(/\)/g, "\\)")
     .replace(/[^\x20-\x7E]/g, (char) => {
-      const map = { "á": "a", "à": "a", "â": "a", "ã": "a", "é": "e", "ê": "e", "í": "i", "ó": "o", "ô": "o", "õ": "o", "ú": "u", "ç": "c", "Á": "A", "À": "A", "Â": "A", "Ã": "A", "É": "E", "Ê": "E", "Í": "I", "Ó": "O", "Ô": "O", "Õ": "O", "Ú": "U", "Ç": "C" };
+      const capitalAWithTilde = String.fromCharCode(0x00C3);
+      const map = { "á": "a", "à": "a", "â": "a", "ã": "a", "é": "e", "ê": "e", "í": "i", "ó": "o", "ô": "o", "õ": "o", "ú": "u", "ç": "c", "Á": "A", "À": "A", "Â": "A", [capitalAWithTilde]: "A", "É": "E", "Ê": "E", "Í": "I", "Ó": "O", "Ô": "O", "Õ": "O", "Ú": "U", "Ç": "C" };
       return map[char] || "";
     });
   const parts = ["BT", `/F1 ${fontSize} Tf`, `${marginLeft} ${startY} Td`, `${lineHeight * -1} TL`];
@@ -3023,14 +4334,14 @@ function normalizePdfText(value) {
 }
 
 window.addEventListener("beforeprint", () => {
-  if (!document.body.classList.contains("printing-schedule") && !document.body.classList.contains("printing-planning")) {
+  if (!document.body.classList.contains("printing-schedule") && !document.body.classList.contains("printing-planning") && !document.body.classList.contains("printing-vacation-map")) {
     if (qs("#planningDialog")?.open) document.body.classList.add("printing-planning");
     if (qs("#scheduleDialog")?.open) document.body.classList.add("printing-schedule");
   }
 });
 
 window.addEventListener("afterprint", () => {
-  document.body.classList.remove("printing-schedule", "printing-planning");
+  document.body.classList.remove("printing-schedule", "printing-planning", "printing-vacation-map");
 });
 
 function toDatasetKey(key) {
@@ -3041,3 +4352,6 @@ initSupabase();
 setView(defaultView());
 render();
 loadStateFromSupabase();
+
+
+
