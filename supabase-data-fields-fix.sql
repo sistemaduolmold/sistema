@@ -20,6 +20,7 @@ alter table public.clients
 alter table public.users
   add column if not exists employee_number text not null default '',
   add column if not exists phone text not null default '',
+  add column if not exists admission_date date,
   add column if not exists position text not null default '',
   add column if not exists status text not null default 'Ativo';
 

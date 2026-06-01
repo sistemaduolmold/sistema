@@ -384,7 +384,7 @@
         <section class="view" id="vacationsView">
           <div class="policy-strip">
             <strong>Regra de férias:</strong>
-            <span>22 dias por colaborador no ano. Cada pedido pode ter no máximo 11 dias a partir da data inicial; pedidos do funcionário geram aviso por email para Admin e RH.</span>
+            <span>Colaboradores admitidos em anos anteriores têm direito a 22 dias. No próprio ano de admissão, o limite é 6 dias; a partir do ano seguinte passa automaticamente para 22 dias. Cada pedido pode ter no máximo 11 dias a partir da data inicial; pedidos do funcionário geram aviso por email para Admin e RH.</span>
           </div>
           <div class="list-toolbar">
             <label class="search-box">
@@ -468,6 +468,34 @@
         </div>
         <div id="vacationMap"></div>
       </div>
+    </dialog>
+
+    <dialog id="vacationLegendDialog">
+      <form id="vacationLegendForm" method="dialog">
+        <div class="dialog-header">
+          <div>
+            <h2>Editar legenda</h2>
+            <p>Altere letras, textos e cores ou acrescente novas opções.</p>
+          </div>
+          <button class="icon-button" id="closeVacationLegendButton" type="button" aria-label="Fechar">x</button>
+        </div>
+        <div class="vacation-legend-editor" id="vacationLegendEditor"></div>
+        <div class="dialog-actions">
+          <button class="secondary-button" id="addVacationLegendItemButton" type="button">Adicionar opção</button>
+          <button class="primary-button" type="submit">Guardar legenda</button>
+        </div>
+      </form>
+    </dialog>
+
+    <dialog id="vacationCellDialog">
+      <div class="dialog-header">
+        <div>
+          <h2>Preencher dia</h2>
+          <p id="vacationCellDialogSubtitle">Escolha uma opção da legenda.</p>
+        </div>
+        <button class="icon-button" id="closeVacationCellButton" type="button" aria-label="Fechar">x</button>
+      </div>
+      <div class="vacation-cell-options" id="vacationCellOptions"></div>
     </dialog>
 
     <dialog id="recordDialog">
@@ -572,6 +600,7 @@
     <script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/jspdf-autotable@3.8.4/dist/jspdf.plugin.autotable.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js"></script>
     <script src="supabase-config.js"></script>
     <script src="app.js"></script>
   </body>

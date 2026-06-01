@@ -2,29 +2,28 @@
 
 const maxVacationRequestDays = 11;
 const annualVacationDays = 22;
+const firstYearVacationDays = 6;
 
 const demoData = {
   activeAccount: "user:user-admin",
-  companies: [
-    { id: "empresa-1", name: "Metal Norte, Lda.", vat: "PT509876321", email: "geral@metalnorte.pt", phone: "+351 255 100 200", city: "Porto", sector: "Metalomecanica", address: "Rua Industrial 120, Porto", notes: "Cliente ativo para acompanhamento de molde." },
-    { id: "empresa-2", name: "Plastiform Moldes", vat: "PT514223987", email: "info@plastiform.pt", phone: "+351 244 300 550", city: "Leiria", sector: "Moldes", address: "Zona Industrial, Leiria", notes: "Prospeccao iniciada este mes." }
-  ],
-  clients: [
-    { id: "client-ana", name: "Ana Martins", companyId: "empresa-1", email: "ana@metalnorte.pt", password: "cliente123", phone: "+351 912 345 678", status: "Ativo", owner: "Admin", role: "Compras", notes: "Cliente principal para acompanhamento semanal." },
-    { id: "client-carlos", name: "Carlos Silva", companyId: "empresa-2", email: "carlos@plastiform.pt", password: "cliente123", phone: "+351 934 567 210", status: "Prospecto", owner: "Admin", role: "Direcao tecnica", notes: "Aguardar validacao dos dados da empresa." }
-  ],
+  companies: [],
+  clients: [],
   users: [
-    { id: "user-admin", employeeNumber: "ADM-001", name: "Administrador", email: "sistemaduolmold@gmail.com", password: "Admin123!", phone: "+351 900 000 001", role: "Admin", department: "Direcao", position: "Administrador", status: "Ativo" },
-    { id: "user-rh", employeeNumber: "RH-001", name: "Recursos Humanos", email: "rh@empresa.pt", password: "rh123", phone: "+351 900 000 002", role: "RH", department: "Recursos Humanos", position: "Gestor RH", status: "Ativo" },
-    { id: "user-funcionario", employeeNumber: "COL-001", name: "Joao Ferreira", email: "joao@empresa.pt", password: "funcionario123", phone: "+351 900 000 003", role: "Funcionario", department: "Producao", position: "Tecnico", status: "Ativo" }
+    { id: "user-admin", employeeNumber: "ADM-001", name: "Administrador", email: "sistemaduolmold@gmail.com", password: "Admin123!", phone: "+351 900 000 001", admissionDate: "2025-01-01", role: "Admin", department: "Direcao", position: "Administrador", status: "Ativo" },
+    { id: "user-rh", employeeNumber: "RH-001", name: "Recursos Humanos", email: "rh@empresa.pt", password: "rh123", phone: "+351 900 000 002", admissionDate: "2025-01-01", role: "RH", department: "Recursos Humanos", position: "Gestor RH", status: "Ativo" },
+    { id: "user-funcionario", employeeNumber: "COL-001", name: "Joao Ferreira", email: "joao@empresa.pt", password: "funcionario123", phone: "+351 900 000 003", admissionDate: "2025-01-01", role: "Funcionario", department: "Producao", position: "Tecnico", status: "Ativo" }
   ],
-  orders: [
-    { id: "order-1", clientId: "client-ana", reference: "OS-2026-001", title: "Planeamento de molde", description: "Molde técnico para nova encomenda.", status: "Em produção", progress: "45", dueDate: "2026-06-15", weeklyUpdate: "Molde em fase de planeamento e validação técnica.", tasks: "Revisão técnica; preparação MOD 54; preparação MOD 55." },
-    { id: "order-2", clientId: "client-carlos", reference: "OS-2026-002", title: "Ajuste de cavidade", description: "Revisão e ajuste de molde existente.", status: "Em análise", progress: "20", dueDate: "2026-06-28", weeklyUpdate: "Equipa técnica a rever ficheiros enviados.", tasks: "Análise dimensional; contacto com cliente." }
-  ],
+  orders: [],
   vacations: [],
   absences: [],
-  notifications: []
+  notifications: [],
+  vacationMapOverrides: [],
+  vacationMapDocument: {
+    company: "Duomold - Fábrica de Moldes, Lda.",
+    address: "Rua do Sobral, 585 - Pavilhão 1 - 3720-602 Oliveira de Azeméis",
+    workplace: "Global",
+    legend: {}
+  }
 };
 
 const scheduleOperations = [
@@ -126,15 +125,32 @@ const vacationMapMonths = [
   "DEZEMBRO"
 ];
 const vacationWeekdays = ["D", "S", "T", "Q", "Q", "S", "S"];
+const portugalNationalHolidays = {
+  "2026-01-01": "Ano Novo",
+  "2026-04-03": "Sexta-feira Santa",
+  "2026-04-05": "Domingo de Páscoa",
+  "2026-04-25": "Dia da Liberdade",
+  "2026-05-01": "Dia do Trabalhador",
+  "2026-06-04": "Corpo de Deus",
+  "2026-06-10": "Dia de Portugal",
+  "2026-08-15": "Assunção de Nossa Senhora",
+  "2026-10-05": "Implantação da República",
+  "2026-11-01": "Todos os Santos",
+  "2026-12-01": "Restauração da Independência",
+  "2026-12-08": "Imaculada Conceição",
+  "2026-12-25": "Natal"
+};
 const vacationLegendItems = [
-  { code: "N", label: "Feriado nacional", className: "national-holiday" },
-  { code: "N", label: "Feriado municipal", className: "municipal-holiday" },
-  { code: "N", label: "Fim-de-semana", className: "weekend" },
-  { code: "", label: "Férias", className: "vacation" },
-  { code: "", label: "Dia a não marcar", className: "blocked-day" },
-  { code: "", label: "Carnaval", className: "carnival" },
-  { code: "", label: "Férias do ano anterior / ano de admissão", className: "previous-year" },
-  { code: "", label: "Meio-dia de férias", className: "half-day" }
+  { id: "national", code: "N", label: "Feriado nacional", className: "national-holiday", color: "#b8cce4" },
+  { id: "municipal", code: "N", label: "Feriado municipal", className: "municipal-holiday", color: "#c2d69b" },
+  { id: "weekend", code: "N", label: "Fim-de-semana", className: "weekend", color: "#ffffff" },
+  { id: "vacation", code: "F", label: "Férias", className: "vacation", color: "#00b0f0" },
+  { id: "blocked", code: "X", label: "Dia a não marcar", className: "blocked-day", color: "#ff0000" },
+  { id: "carnival", code: "C", label: "Carnaval", className: "carnival", color: "#ccc0d9" },
+  { id: "previous-year", code: "A", label: "Férias do ano anterior / ano de admissão", className: "previous-year", color: "#e36d09" },
+  { id: "half-day", code: "M", label: "Meio-dia de férias", className: "half-day", color: "#92cddc" },
+  { id: "bank-hours", code: "BG", label: "Banco de horas", className: "code-bg", color: "#92cddc" },
+  { id: "compensatory", code: "DC", label: "Descanso compensatório", className: "code-dc", color: "#e36d09" }
 ];
 
 let state = loadState();
@@ -225,6 +241,7 @@ const forms = {
     ["email", "Email", "email", true],
     ["password", "Senha", "password", true],
     ["phone", "Telefone", "tel"],
+    ["admissionDate", "Data de admissão", "date", true],
     ["department", "Departamento", "text"],
     ["position", "Cargo", "text"],
     ["status", "Estado", "select:Ativo|Inativo"]
@@ -234,6 +251,7 @@ const forms = {
     ["name", "Nome", "text", true],
     ["email", "Email", "email", true],
     ["phone", "Telefone", "tel"],
+    ["admissionDate", "Data de admissão", "date", true],
     ["department", "Departamento", "text"],
     ["position", "Cargo", "text"],
     ["status", "Estado", "select:Ativo|Inativo"]
@@ -292,10 +310,20 @@ function loadState() {
 function mergeState(saved) {
   const merged = structuredClone(demoData);
   Object.assign(merged, saved);
-  ["companies", "clients", "users", "orders"].forEach((key) => {
+  ["companies", "users", "orders"].forEach((key) => {
     if (!Array.isArray(merged[key]) || !merged[key].length) merged[key] = structuredClone(demoData[key]);
   });
+  if (!Array.isArray(merged.clients)) merged.clients = structuredClone(demoData.clients);
   if (!Array.isArray(merged.notifications)) merged.notifications = [];
+  if (!Array.isArray(merged.vacationMapOverrides)) merged.vacationMapOverrides = [];
+  merged.vacationMapDocument = {
+    ...structuredClone(demoData.vacationMapDocument),
+    ...(merged.vacationMapDocument || {}),
+    legend: {
+      ...(demoData.vacationMapDocument.legend || {}),
+      ...(merged.vacationMapDocument?.legend || {})
+    }
+  };
   merged.users = merged.users.map((user, index) => ({ ...user, employeeNumber: user.employeeNumber || `COL-${String(index + 1).padStart(3, "0")}` }));
   // Ferias nunca sao carregadas do localStorage nem do duomold_app_state.
   // A fonte unica e a tabela public.vacations no Supabase.
@@ -445,6 +473,10 @@ async function saveStateToSupabase() {
 function appStatePayload() {
   return {
     ...state,
+    companies: [],
+    clients: [],
+    users: [],
+    orders: [],
     vacations: [],
     absences: []
   };
@@ -479,9 +511,16 @@ async function safeUpsertRows(tableName, rows, attempt = 0) {
 }
 
 async function deleteSupabaseRecord(tableName, id) {
-  if (!supabaseClient || !tableName || !id) return;
-  const { error } = await supabaseClient.from(tableName).delete().eq("id", id);
-  if (error) console.warn(`Nao foi possivel apagar ${id} em ${tableName}.`, error);
+  if (!supabaseClient || !tableName || !id) return true;
+  try {
+    const { error } = await supabaseClient.from(tableName).delete().eq("id", id);
+    if (!error) return true;
+    console.warn(`Nao foi possivel apagar ${id} em ${tableName}.`, error);
+    return false;
+  } catch (error) {
+    console.warn(`Nao foi possivel apagar ${id} em ${tableName}.`, error);
+    return false;
+  }
 }
 
 function account() {
@@ -568,6 +607,10 @@ function canCreateHere() {
 
 function canManageUsers() {
   return ["Admin", "RH"].includes(role());
+}
+
+function canEditVacationMap() {
+  return !isClient() && ["Admin", "RH"].includes(role());
 }
 
 function modeFromView() {
@@ -683,6 +726,7 @@ function importSupabaseUser(row) {
     email: row.email || "",
     password: row.password || "",
     phone: row.phone || "",
+    admissionDate: row.admission_date || "",
     role: row.profile || row.role || "Funcionario",
     department: row.department || "",
     position: row.position || "",
@@ -744,16 +788,17 @@ async function loadCoreDataFromSupabase() {
       supabaseClient.from("notifications").select("*").order("created_at", { ascending: false })
     ]);
     if (companies.error) console.warn("Nao foi possivel carregar companies.", companies.error);
-    else state.companies = mergeSupabaseCollection(state.companies, companies.data.map(mapCompanyFromSupabase));
+    else state.companies = companies.data.map(mapCompanyFromSupabase);
 
     if (clients.error) console.warn("Nao foi possivel carregar clients.", clients.error);
-    else state.clients = mergeSupabaseCollection(state.clients, clients.data.map(mapClientFromSupabase));
+    // A tabela remota e a fonte unica para nao restaurar clientes apagados a partir do cache local.
+    else state.clients = clients.data.map(mapClientFromSupabase);
 
     if (users.error) console.warn("Nao foi possivel carregar users.", users.error);
-    else state.users = mergeSupabaseCollection(state.users, users.data.map(mapUserFromSupabase));
+    else state.users = users.data.map(mapUserFromSupabase);
 
     if (orders.error) console.warn("Nao foi possivel carregar orders.", orders.error);
-    else state.orders = mergeSupabaseCollection(state.orders, orders.data.map(mapOrderFromSupabase));
+    else state.orders = orders.data.map(mapOrderFromSupabase);
 
     if (vacations.error) console.warn("Nao foi possivel carregar vacations.", vacations.error);
     else state.vacations = cleanVacationRecords(vacations.data.map(mapVacationFromSupabase), state.users);
@@ -937,6 +982,7 @@ function userToSupabase(user) {
     email: user.email || "",
     password: user.password || "",
     phone: user.phone || "",
+    admission_date: user.admissionDate || null,
     profile: user.role || "Funcionario",
     role: user.role || "Funcionario",
     department: user.department || "",
@@ -1041,12 +1087,14 @@ function renderRolePages() {
   compact("#rhVacationsList", state.vacations.filter((item) => item.status === "Pendente"), (item) => ({ title: userName(item.userId), meta: `${date(item.startDate)} a ${date(item.endDate)}`, badge: `${item.days} dias` }));
   compact("#rhAbsencesList", state.absences.filter((item) => item.status === "Pendente"), (item) => ({ title: userName(item.userId), meta: item.reason || "Sem motivo", badge: item.type }));
   const employeeId = currentUser()?.id || "user-funcionario";
-  const vacations = state.vacations.filter((item) => item.userId === employeeId);
+  const currentVacationYear = new Date().getFullYear();
+  const vacations = state.vacations.filter((item) => item.userId === employeeId && Number(String(item.startDate || "").slice(0, 4)) === currentVacationYear);
+  const employeeAllowance = vacationAllowance(employeeId);
   const approved = sum(vacations.filter((item) => item.status === "Aprovado" && item.origin === "Funcionario"));
   const pending = sum(vacations.filter((item) => item.status === "Pendente" && item.origin === "Funcionario"));
   text("#employeeApprovedDays", approved);
   text("#employeePendingDays", pending);
-  text("#employeeAvailableDays", Math.max(annualVacationDays - approved - pending, 0));
+  text("#employeeAvailableDays", Math.max(employeeAllowance - approved - pending, 0));
   text("#employeePendingAbsences", state.absences.filter((item) => item.userId === employeeId && item.status === "Pendente").length);
   compact("#employeeVacationsList", vacations, (item) => ({ title: `${date(item.startDate)} a ${date(item.endDate)}`, meta: `${item.days} dias - ${item.origin}`, badge: item.status }));
   compact("#employeeAbsencesList", state.absences.filter((item) => item.userId === employeeId), (item) => ({ title: date(item.date), meta: item.reason, badge: item.status }));
@@ -1143,6 +1191,7 @@ function renderProfile() {
         ["Perfil", record.role],
         ["Email", record.email],
         ["Telefone", record.phone],
+        ["Data de admissão", record.admissionDate ? date(record.admissionDate) : ""],
         ["Departamento", record.department],
         ["Cargo", record.position],
         ["Estado", record.status]
@@ -1255,14 +1304,15 @@ function renderUsers() {
   const addButton = qs("#addUserButton");
   if (addButton) addButton.hidden = !canManageUsers();
   table("#usersTable", rows, (user) => {
-    const total = sum(state.vacations.filter((item) => item.userId === user.id && item.status !== "Rejeitado"));
+    const allowance = vacationAllowance(user.id);
+    const total = vacationDaysUsed(user.id);
     return `<tr>
       <td><strong>${esc(user.name)}</strong><small>${esc(user.position || "Sem cargo")}</small></td>
       <td><strong>${esc(user.employeeNumber || "Sem matrícula")}</strong></td>
       <td><span class="status ${cls(user.role)}">${esc(user.role)}</span></td>
       <td><strong>${esc(user.email)}</strong><small>${esc(user.phone || "Sem telefone")}</small></td>
       <td>${esc(user.department || "Sem departamento")}</td>
-      <td><strong>${total}/${annualVacationDays} dias</strong><small>Limite anual</small></td>
+      <td><strong>${total}/${allowance} dias</strong><small>Limite anual</small></td>
       <td><div class="row-actions">${role() === "Admin" ? `<button class="row-action" data-edit-user="${user.id}">Editar</button><button class="row-action delete" data-delete-user="${user.id}">Apagar</button>` : ""}</div></td>
     </tr>`;
   });
@@ -1319,14 +1369,17 @@ function renderVacationMap() {
 
 function buildVacationMapHtml() {
   const records = vacationMapRecords(vacationMapFilters());
+  const doc = vacationMapDocument();
+  const editable = canEditVacationMap();
 
   return `
     <div class="vacation-map-card">
       <div class="vacation-map-header">
         <div class="vacation-map-meta">
-          <strong>Duomold - Fábrica de Moldes, Lda.</strong>
-          <small>Rua do Sobral, 585 - Pavilhão 1 - 3720-602 Oliveira de Azeméis</small>
-          <small>Local trabalho: Global</small>
+          <strong ${editable ? `contenteditable="true" data-vacation-doc-field="company"` : ""}>${esc(doc.company)}</strong>
+          <small ${editable ? `contenteditable="true" data-vacation-doc-field="address"` : ""}>${esc(doc.address)}</small>
+          <small>Local trabalho: <span ${editable ? `contenteditable="true" data-vacation-doc-field="workplace"` : ""}>${esc(doc.workplace)}</span></small>
+          ${editable ? `<small class="vacation-map-edit-hint">Admin/RH: clique nas células para preencher manualmente; clique nos textos para editar.</small>` : ""}
         </div>
       </div>
       ${buildVacationLegendHtml()}
@@ -1337,14 +1390,32 @@ function buildVacationMapHtml() {
   `;
 }
 
+function vacationMapDocument() {
+  if (!state.vacationMapDocument || typeof state.vacationMapDocument !== "object") {
+    state.vacationMapDocument = structuredClone(demoData.vacationMapDocument);
+  }
+  if (!state.vacationMapDocument.legend || typeof state.vacationMapDocument.legend !== "object") state.vacationMapDocument.legend = {};
+  return state.vacationMapDocument;
+}
+
+function vacationMapLegendItems() {
+  const doc = vacationMapDocument();
+  if (!Array.isArray(doc.legendItems) || !doc.legendItems.length) {
+    doc.legendItems = vacationLegendItems.map((item) => ({ ...item }));
+  }
+  return doc.legendItems;
+}
+
 function buildVacationLegendHtml() {
+  const editable = canEditVacationMap();
   return `
     <div class="vacation-excel-legend" aria-label="Legenda do mapa de férias">
       <div class="vacation-excel-legend-title">Legenda:</div>
-      ${vacationLegendItems.map((item) => `
-        <div class="vacation-excel-legend-code ${item.className}">${esc(item.code)}</div>
+      ${vacationMapLegendItems().map((item) => `
+        <div class="vacation-excel-legend-code" style="background:${esc(item.color || "#ffffff")}">${esc(item.code)}</div>
         <div class="vacation-excel-legend-label">${esc(item.label)}</div>
       `).join("")}
+      ${editable ? `<button class="vacation-legend-edit-button" data-edit-vacation-legend type="button" title="Editar legenda" aria-label="Editar legenda">✎</button>` : ""}
     </div>
   `;
 }
@@ -1384,12 +1455,30 @@ function vacationMapPeople(filters = vacationMapFilters(), records = []) {
 }
 
 function vacationMapCellInfo(userId, iso, monthRecords) {
+  const override = vacationMapOverride(userId, iso);
+  if (override) {
+    return {
+      value: override.code,
+      className: vacationMapClassForCode(override.code),
+      color: override.color || "",
+      title: `${userName(userId)} - ${date(iso)} - Manual: ${override.code}`
+    };
+  }
+  if (portugalNationalHolidays[iso]) {
+    return {
+      value: "N",
+      className: "national-holiday",
+      color: vacationMapLegendItems().find((item) => item.id === "national")?.color || "#b8cce4",
+      title: `${userName(userId)} - ${date(iso)} - ${portugalNationalHolidays[iso]}`
+    };
+  }
   const item = monthRecords.find((record) => record.userId === userId && iso >= record.startDate && iso <= record.endDate);
   if (item) {
     const code = vacationCode(item);
     return {
       value: code,
       className: `code-${String(code).toLowerCase()}`,
+      color: vacationMapLegendItems().find((legendItem) => legendItem.code === code)?.color || "",
       title: `${userName(userId)} - ${date(iso)} - ${vacationCodeLabel(code)}`
     };
   }
@@ -1397,10 +1486,26 @@ function vacationMapCellInfo(userId, iso, monthRecords) {
     return {
       value: "N",
       className: "weekend",
+      color: vacationMapLegendItems().find((item) => item.id === "weekend")?.color || "#ffffff",
       title: `${userName(userId)} - ${date(iso)} - Fim-de-semana`
     };
   }
   return { value: "", className: "", title: `${userName(userId)} - ${date(iso)}` };
+}
+
+function vacationMapClassForCode(code) {
+  const valueText = String(code || "").toUpperCase();
+  if (["F", "BG", "DC"].includes(valueText)) return `code-${valueText.toLowerCase()}`;
+  if (valueText === "N") return "national-holiday";
+  if (valueText === "X") return "blocked-day";
+  if (valueText === "C") return "carnival";
+  if (valueText === "A") return "previous-year";
+  if (valueText === "M") return "half-day";
+  return "";
+}
+
+function vacationMapOverride(userId, iso) {
+  return state.vacationMapOverrides.find((item) => item.userId === userId && item.date === iso);
 }
 
 function buildVacationExcelMonthTable(monthName, monthIndex, records, options = {}) {
@@ -1423,7 +1528,9 @@ function buildVacationExcelMonthTable(monthName, monthIndex, records, options = 
       const iso = isoDate(vacationMapYear, monthIndex + 1, index + 1);
       const cell = vacationMapCellInfo(user.id, iso, monthRecords);
       const label = cell.value === "N" ? "N" : index + 1;
-      return `<td class="excel-day-cell ${cell.className}" title="${esc(cell.title)}">${esc(label)}</td>`;
+      const editableAttrs = canEditVacationMap() ? `data-vacation-map-cell data-user-id="${esc(user.id)}" data-date="${esc(iso)}"` : "";
+      const colorStyle = cell.color ? `style="background:${esc(cell.color)}"` : "";
+      return `<td class="excel-day-cell ${cell.className}" ${editableAttrs} ${colorStyle} title="${esc(cell.title)}">${esc(label)}</td>`;
     }).join("");
     return `
       <tr>
@@ -1482,6 +1589,111 @@ function vacationMapRecords(filters = {}) {
       return haystack.includes(filters.query);
     })
     .sort((a, b) => String(a.startDate).localeCompare(String(b.startDate)) || userName(a.userId).localeCompare(userName(b.userId)));
+}
+
+function editVacationMapCell(cell) {
+  if (!canEditVacationMap()) return;
+  const userId = cell.dataset.userId;
+  const iso = cell.dataset.date;
+  if (!userId || !iso) return;
+  const dialog = qs("#vacationCellDialog");
+  dialog.dataset.userId = userId;
+  dialog.dataset.date = iso;
+  text("#vacationCellDialogSubtitle", `${userName(userId)} - ${date(iso)}. Escolha uma opção da legenda.`);
+  qs("#vacationCellOptions").innerHTML = `
+    ${vacationMapLegendItems().map((item) => `
+      <button class="vacation-cell-option" data-vacation-cell-option="${esc(item.id)}" type="button">
+        <span style="background:${esc(item.color || "#ffffff")}">${esc(item.code || "")}</span>
+        <strong>${esc(item.label)}</strong>
+      </button>
+    `).join("")}
+    <button class="vacation-cell-option clear" data-vacation-cell-clear type="button">
+      <span>×</span><strong>Limpar preenchimento manual</strong>
+    </button>
+  `;
+  dialog.showModal();
+}
+
+function saveVacationMapCellSelection(legendId = "") {
+  const dialog = qs("#vacationCellDialog");
+  const userId = dialog.dataset.userId;
+  const iso = dialog.dataset.date;
+  const legendItem = vacationMapLegendItems().find((item) => item.id === legendId);
+  state.vacationMapOverrides = state.vacationMapOverrides.filter((item) => !(item.userId === userId && item.date === iso));
+  if (legendItem) {
+    state.vacationMapOverrides.push({
+      userId,
+      date: iso,
+      legendId: legendItem.id,
+      code: legendItem.code || "",
+      color: legendItem.color || "#ffffff",
+      label: legendItem.label || "",
+      updatedBy: currentUser()?.id || "",
+      updatedAt: new Date().toISOString()
+    });
+  }
+  dialog.close();
+  persistStateOnly();
+  renderVacationMap();
+}
+
+function saveVacationMapDocumentField(target) {
+  if (!canEditVacationMap()) return;
+  const doc = vacationMapDocument();
+  const valueText = target.textContent.trim();
+  if (target.dataset.vacationDocField) {
+    doc[target.dataset.vacationDocField] = valueText;
+    persistStateOnly();
+    return;
+  }
+  if (target.dataset.vacationLegendIndex !== undefined) {
+    doc.legend[target.dataset.vacationLegendIndex] = valueText;
+    persistStateOnly();
+  }
+}
+
+function openVacationLegendEditor() {
+  if (!canEditVacationMap()) return;
+  renderVacationLegendEditor();
+  qs("#vacationLegendDialog").showModal();
+}
+
+function renderVacationLegendEditor() {
+  qs("#vacationLegendEditor").innerHTML = vacationMapLegendItems().map((item, index) => `
+    <div class="vacation-legend-editor-row" data-vacation-legend-row="${index}">
+      <input name="legendCode" value="${esc(item.code || "")}" placeholder="Letra">
+      <input name="legendLabel" value="${esc(item.label || "")}" placeholder="Texto da legenda">
+      <input name="legendColor" type="color" value="${esc(item.color || "#ffffff")}">
+      <button class="planning-mini red" data-delete-vacation-legend="${index}" type="button">X</button>
+    </div>
+  `).join("");
+}
+
+function addVacationLegendItem() {
+  vacationMapLegendItems().push({
+    id: `custom-${Date.now()}`,
+    code: "",
+    label: "Nova opção",
+    className: "custom",
+    color: "#ffffff"
+  });
+  renderVacationLegendEditor();
+}
+
+function saveVacationLegend(event) {
+  event.preventDefault();
+  const rows = qsa("[data-vacation-legend-row]", qs("#vacationLegendEditor"));
+  const previous = vacationMapLegendItems();
+  vacationMapDocument().legendItems = rows.map((row, index) => ({
+    id: previous[index]?.id || `custom-${Date.now()}-${index}`,
+    code: row.querySelector('[name="legendCode"]').value.trim().toUpperCase(),
+    label: row.querySelector('[name="legendLabel"]').value.trim() || "Sem nome",
+    className: previous[index]?.className || "custom",
+    color: row.querySelector('[name="legendColor"]').value || "#ffffff"
+  }));
+  qs("#vacationLegendDialog").close();
+  persistStateOnly();
+  renderVacationMap();
 }
 
 function vacationTeamName(userId) {
@@ -1822,9 +2034,11 @@ function handleSubmit(event) {
     const wasEditingAbsence = Boolean(editingId);
     data.attachments = cloneAttachments(dialogAttachments);
     const existingCompensation = editingId && state.vacations.some((item) => item.linkedAbsenceId === editingId);
-    const usedForCompensation = vacationDaysUsed(data.userId) - (existingCompensation ? 1 : 0);
-    if (data.compensateVacation === "Sim" && data.status !== "Rejeitado" && usedForCompensation + 1 > annualVacationDays) {
-      qs("#formAlert").textContent = "Não é possível compensar com férias porque o colaborador já atingiu o limite anual de 22 dias.";
+    const absenceYear = Number(String(data.date || today()).slice(0, 4));
+    const allowance = vacationAllowance(data.userId, absenceYear);
+    const usedForCompensation = vacationDaysUsed(data.userId, null, absenceYear) - (existingCompensation ? 1 : 0);
+    if (data.compensateVacation === "Sim" && data.status !== "Rejeitado" && usedForCompensation + 1 > allowance) {
+      qs("#formAlert").textContent = `Não é possível compensar com férias porque o colaborador já atingiu o limite anual de ${allowance} dias.`;
       return;
     }
     const savedAbsence = saveAbsenceWithCompensation(data);
@@ -2066,9 +2280,11 @@ function updateVacationCalculation() {
     total = businessDays(start.value, end.value);
   }
   days.value = total || "";
-  const used = vacationDaysUsed(form.elements.userId.value, editingId);
-  const remaining = Math.max(annualVacationDays - used - total, 0);
-  if (hint) hint.textContent = `Total deste pedido: ${total} dias úteis. Já usados/pendentes: ${used}/${annualVacationDays}. Restam após este pedido: ${remaining}.`;
+  const vacationYear = Number(String(start.value || today()).slice(0, 4));
+  const allowance = vacationAllowance(form.elements.userId.value, vacationYear);
+  const used = vacationDaysUsed(form.elements.userId.value, editingId, vacationYear);
+  const remaining = Math.max(allowance - used - total, 0);
+  if (hint) hint.textContent = `Total deste pedido: ${total} dias úteis. Já usados/pendentes: ${used}/${allowance}. Restam após este pedido: ${remaining}.`;
 }
 
 function validateVacation(data) {
@@ -2078,8 +2294,10 @@ function validateVacation(data) {
   if (data.endDate > addDays(data.startDate, maxVacationRequestDays - 1)) return { ok: false, message: `A data final pode ir apenas até ${maxVacationRequestDays} dias corridos a partir da data inicial.` };
   if (days < 1) return { ok: false, message: "O período precisa ter pelo menos 1 dia útil." };
   if (days > maxVacationRequestDays) return { ok: false, message: `Cada pedido de férias pode ter no máximo ${maxVacationRequestDays} dias úteis a partir da data inicial.` };
-  const used = vacationDaysUsed(data.userId, editingId);
-  if (used + days > annualVacationDays) return { ok: false, message: `Este colaborador já tem ${used} dias usados/pendentes. O limite anual é ${annualVacationDays} dias.` };
+  const vacationYear = Number(String(data.startDate || today()).slice(0, 4));
+  const allowance = vacationAllowance(data.userId, vacationYear);
+  const used = vacationDaysUsed(data.userId, editingId, vacationYear);
+  if (used + days > allowance) return { ok: false, message: `Este colaborador já tem ${used} dias usados/pendentes. O limite anual é ${allowance} dias.` };
   return { ok: true, days };
 }
 
@@ -2093,9 +2311,16 @@ function deriveVacationCode(data = {}) {
   return "F";
 }
 
-function vacationDaysUsed(userId, ignoreId = null) {
+function vacationAllowance(userId, year = new Date().getFullYear()) {
+  const user = state.users.find((item) => item.id === userId);
+  const admissionYear = Number(String(user?.admissionDate || "").slice(0, 4));
+  return admissionYear && admissionYear === Number(year) ? firstYearVacationDays : annualVacationDays;
+}
+
+function vacationDaysUsed(userId, ignoreId = null, year = new Date().getFullYear()) {
   return state.vacations
     .filter((item) => item.userId === userId && item.id !== ignoreId && item.status !== "Rejeitado")
+    .filter((item) => Number(String(item.startDate || "").slice(0, 4)) === Number(year))
     .reduce((total, item) => total + Number(item.days || 0), 0);
 }
 
@@ -2162,7 +2387,7 @@ function defaultRecord(mode) {
   if (mode === "order") return { clientId: state.clients[0]?.id, status: "Recebido", progress: "0", showPlanningToClient: "Sim", showScheduleToClient: "Sim", history: [] };
   if (mode === "vacation") return { userId: currentUser()?.id || "user-funcionario", origin: role() === "Funcionario" ? "Funcionario" : "Admin/RH", status: role() === "Funcionario" ? "Pendente" : "Aprovado" };
   if (mode === "absence") return { userId: currentUser()?.id || "user-funcionario", type: "Justificada", compensateVacation: "Não", status: "Pendente" };
-  if (mode === "user") return { employeeNumber: `COL-${String(state.users.length + 1).padStart(3, "0")}`, role: "Funcionario", status: "Ativo" };
+  if (mode === "user") return { employeeNumber: `COL-${String(state.users.length + 1).padStart(3, "0")}`, admissionDate: "", role: "Funcionario", status: "Ativo" };
   if (mode === "client") return { companyName: "", status: "Ativo", password: "cliente123" };
   return {};
 }
@@ -2171,13 +2396,20 @@ function label(mode) {
   return { client: "cliente / empresa", company: "empresa", order: "encomenda", user: "colaborador", vacation: "férias", absence: "falta" }[mode];
 }
 
-function deleteRecord(mode, id) {
+async function deleteRecord(mode, id) {
   if (!confirm(`Apagar ${label(mode)}?`)) return;
   const key = { client: "clients", company: "companies", order: "orders", user: "users", vacation: "vacations", absence: "absences" }[mode];
+  const previousRecords = state[key];
   state[key] = state[key].filter((item) => item.id !== id);
   if (mode === "absence") state.vacations = state.vacations.filter((item) => item.linkedAbsenceId !== id);
   const tableName = { client: "clients", company: "companies", order: "orders", user: "users", vacation: "vacations", absence: "absences" }[mode];
-  void deleteSupabaseRecord(tableName, id);
+  const deleted = await deleteSupabaseRecord(tableName, id);
+  if (!deleted) {
+    state[key] = previousRecords;
+    alert(`Não foi possível apagar ${label(mode)} na base de dados. Confirme as permissões do Supabase e tente novamente.`);
+    render();
+    return;
+  }
   saveState();
 }
 
@@ -2226,15 +2458,136 @@ function printVacationMap() {
   }, 50);
 }
 
-function exportVacationMapExcel() {
+async function exportVacationMapExcel() {
+  if (!window.ExcelJS?.Workbook) {
+    alert("A biblioteca de Excel não carregou corretamente.");
+    return;
+  }
   const records = vacationMapRecords(vacationMapFilters());
-  const html = buildVacationMapExcelHtml(records);
-  const blob = new Blob([html], { type: "application/vnd.ms-excel;charset=utf-8" });
+  const filters = vacationMapFilters();
+  const people = vacationMapPeople(filters, records);
+  const doc = vacationMapDocument();
+  const workbook = new window.ExcelJS.Workbook();
+  workbook.creator = "DUOMOLD";
+  workbook.created = new Date();
+  const sheet = workbook.addWorksheet(`Mapa Férias ${vacationMapYear}`, {
+    pageSetup: { orientation: "landscape", fitToPage: true, fitToWidth: 1, fitToHeight: 0 }
+  });
+
+  sheet.getColumn(1).width = 15;
+  sheet.getColumn(2).width = 28;
+  for (let column = 3; column <= 48; column += 1) sheet.getColumn(column).width = 4.5;
+
+  sheet.mergeCells("A1:AG1");
+  sheet.getCell("A1").value = `Mapa Férias ${vacationMapYear} - Global`;
+  sheet.getCell("A1").font = { bold: true, size: 18 };
+  sheet.getCell("A3").value = "Empresa:";
+  sheet.getCell("B3").value = doc.company;
+  sheet.getCell("A4").value = "Morada:";
+  sheet.getCell("B4").value = doc.address;
+  sheet.getCell("A5").value = "Local trabalho:";
+  sheet.getCell("B5").value = doc.workplace;
+
+  let rowNumber = 7;
+  sheet.getCell(rowNumber, 1).value = "Legenda:";
+  sheet.getCell(rowNumber, 1).font = { bold: true };
+  let legendColumn = 2;
+  vacationMapLegendItems().forEach((item) => {
+    const labelWidth = Math.max(3, Math.ceil(String(item.label || "").length / 5));
+    sheet.getCell(rowNumber, legendColumn).value = item.code || "";
+    sheet.getCell(rowNumber, legendColumn).fill = excelSolidFill(item.color);
+    sheet.getCell(rowNumber, legendColumn).alignment = { horizontal: "center", vertical: "middle" };
+    sheet.getCell(rowNumber, legendColumn).font = { bold: true };
+    sheet.mergeCells(rowNumber, legendColumn + 1, rowNumber, legendColumn + labelWidth);
+    sheet.getCell(rowNumber, legendColumn + 1).value = item.label;
+    sheet.getCell(rowNumber, legendColumn + 1).alignment = { horizontal: "center", vertical: "middle" };
+    legendColumn += labelWidth + 1;
+  });
+  sheet.getRow(rowNumber).height = 18;
+
+  rowNumber += 3;
+  vacationMapMonths.forEach((monthName, monthIndex) => {
+    const daysInMonth = new Date(vacationMapYear, monthIndex + 1, 0).getDate();
+    const monthStart = isoDate(vacationMapYear, monthIndex + 1, 1);
+    const monthEnd = isoDate(vacationMapYear, monthIndex + 1, daysInMonth);
+    const monthRecords = records.filter((item) => String(item.startDate).localeCompare(monthEnd) <= 0 && String(item.endDate).localeCompare(monthStart) >= 0);
+    const firstRow = rowNumber;
+    const weekdayRow = sheet.getRow(rowNumber);
+    weekdayRow.getCell(2).value = "Local trabalho:";
+    weekdayRow.getCell(2).font = { bold: true };
+    for (let day = 1; day <= daysInMonth; day += 1) {
+      const iso = isoDate(vacationMapYear, monthIndex + 1, day);
+      weekdayRow.getCell(day + 2).value = vacationWeekdayLabel(iso);
+    }
+    rowNumber += 1;
+    const dayRow = sheet.getRow(rowNumber);
+    for (let day = 1; day <= daysInMonth; day += 1) dayRow.getCell(day + 2).value = day;
+    rowNumber += 1;
+
+    const monthPeople = people.length ? people : [{ id: "", name: "Sem colaboradores" }];
+    monthPeople.forEach((user) => {
+      const row = sheet.getRow(rowNumber);
+      row.getCell(2).value = user.name;
+      if (user.id) {
+        for (let day = 1; day <= daysInMonth; day += 1) {
+          const iso = isoDate(vacationMapYear, monthIndex + 1, day);
+          const info = vacationMapCellInfo(user.id, iso, monthRecords);
+          const cell = row.getCell(day + 2);
+          cell.value = info.value === "N" ? "N" : day;
+          cell.fill = excelSolidFill(vacationMapCellColor(info));
+        }
+      }
+      rowNumber += 1;
+    });
+
+    sheet.mergeCells(firstRow, 1, rowNumber - 1, 1);
+    const monthCell = sheet.getCell(firstRow, 1);
+    monthCell.value = monthName;
+    monthCell.alignment = { vertical: "middle", horizontal: "center" };
+    monthCell.fill = excelSolidFill("#dbe5f1");
+    styleExcelVacationRange(sheet, firstRow, rowNumber - 1, daysInMonth + 2);
+    rowNumber += 1;
+  });
+
+  sheet.views = [{ state: "frozen", xSplit: 2, ySplit: 9 }];
+  const buffer = await workbook.xlsx.writeBuffer();
+  const blob = new Blob([buffer], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
   const link = document.createElement("a");
   link.href = URL.createObjectURL(blob);
-  link.download = `mapa-ferias-${vacationMapYear}.xls`;
+  link.download = `mapa-ferias-${vacationMapYear}.xlsx`;
   link.click();
   setTimeout(() => URL.revokeObjectURL(link.href), 1000);
+}
+
+function excelSolidFill(color = "#ffffff") {
+  return { type: "pattern", pattern: "solid", fgColor: { argb: `FF${String(color).replace("#", "").toUpperCase()}` } };
+}
+
+function vacationMapCellColor(info = {}) {
+  if (info.color) return info.color;
+  return {
+    "code-f": "#00b0f0",
+    "code-bg": "#92cddc",
+    "code-dc": "#e36d09",
+    "national-holiday": "#b8cce4",
+    weekend: "#ffffff"
+  }[info.className] || "#ffffff";
+}
+
+function styleExcelVacationRange(sheet, firstRow, lastRow, lastColumn) {
+  for (let row = firstRow; row <= lastRow; row += 1) {
+    for (let column = 1; column <= lastColumn; column += 1) {
+      const cell = sheet.getCell(row, column);
+      cell.border = {
+        top: { style: "thin", color: { argb: "FF2F75B5" } },
+        left: { style: "thin", color: { argb: "FF2F75B5" } },
+        bottom: { style: "thin", color: { argb: "FF2F75B5" } },
+        right: { style: "thin", color: { argb: "FF2F75B5" } }
+      };
+      cell.alignment = { vertical: "middle", horizontal: "center" };
+      cell.font = { name: "Calibri", size: 10, bold: column > 2 };
+    }
+  }
 }
 
 function exportVacationMapPdf() {
@@ -2399,7 +2752,11 @@ function buildVacationMapExcelHtml(records) {
         .code-bg { background: #dbeafe; }
         .code-dc { background: #dcfce7; }
         .weekend { background: #ffffff; font-weight: 700; text-align: center; }
-        .vacation-excel-legend { display: grid; grid-template-columns: 76px repeat(8, 28px minmax(112px, 1fr)); margin-bottom: 12px; border: 0; font-family: Calibri, Arial, sans-serif; font-size: 12px; }
+        .vacation-excel-legend { display: flex; align-items: stretch; margin-bottom: 12px; border: 0; font-family: Calibri, Arial, sans-serif; font-size: 12px; }
+        .vacation-excel-legend-title { width: 76px; }
+        .vacation-excel-legend-code { width: 28px; }
+        .vacation-excel-legend-label { width: 148px; }
+        .vacation-legend-edit-button { display: none; }
         .vacation-excel-legend-title, .vacation-excel-legend-code, .vacation-excel-legend-label { min-height: 18px; border-right: 1px solid #d9d9d9; border-bottom: 1px solid #d9d9d9; display: grid; align-items: center; }
         .vacation-excel-legend-title { align-items: center; font-size: 13px; font-weight: 700; }
         .vacation-excel-legend-code { justify-content: center; font-weight: 700; text-align: center; }
@@ -2426,12 +2783,17 @@ function buildVacationMapExcelHtml(records) {
         .vacation-excel-month .excel-day-cell.code-f { background: #00b0f0; }
         .vacation-excel-month .excel-day-cell.code-bg { background: #92cddc; }
         .vacation-excel-month .excel-day-cell.code-dc { background: #e36d09; }
+        .vacation-excel-month .excel-day-cell.national-holiday { background: #b8cce4; }
+        .vacation-excel-month .excel-day-cell.blocked-day { background: #ff0000; }
+        .vacation-excel-month .excel-day-cell.carnival { background: #ccc0d9; }
+        .vacation-excel-month .excel-day-cell.previous-year { background: #e36d09; }
+        .vacation-excel-month .excel-day-cell.half-day { background: #92cddc; }
         .vacation-excel-month .excel-day-cell.weekend { background: #ffffff; }
       </style>
     </head>
     <body>
       <h1>Mapa Férias ${vacationMapYear} - Global</h1>
-      <p>Empresa: Duomold - Fábrica de Moldes, Lda.</p>
+      <p>Empresa: ${esc(vacationMapDocument().company)}</p>
       <p>Equipas: ${esc(teams.join(", ") || "Sem equipas")}</p>
       ${buildVacationLegendHtml()}
       ${months}
@@ -2544,8 +2906,7 @@ function buildVacationMapPrintableHtml(records) {
         }
 
         .vacation-excel-legend {
-          display: grid;
-          grid-template-columns: 76px repeat(8, 28px minmax(112px, 1fr));
+          display: flex;
           align-items: stretch;
           margin-bottom: 10px;
           border: 0;
@@ -2554,6 +2915,11 @@ function buildVacationMapPrintableHtml(records) {
           font-family: Calibri, Arial, sans-serif;
           font-size: 10px;
         }
+
+        .vacation-excel-legend-title { width: 76px; }
+        .vacation-excel-legend-code { width: 28px; }
+        .vacation-excel-legend-label { width: 148px; }
+        .vacation-legend-edit-button { display: none; }
 
         .vacation-excel-legend-title,
         .vacation-excel-legend-code,
@@ -2737,6 +3103,11 @@ function buildVacationMapPrintableHtml(records) {
         .vacation-excel-month .excel-day-cell.code-f { background: #00b0f0; }
         .vacation-excel-month .excel-day-cell.code-bg { background: #92cddc; }
         .vacation-excel-month .excel-day-cell.code-dc { background: #e36d09; }
+        .vacation-excel-month .excel-day-cell.national-holiday { background: #b8cce4; }
+        .vacation-excel-month .excel-day-cell.blocked-day { background: #ff0000; }
+        .vacation-excel-month .excel-day-cell.carnival { background: #ccc0d9; }
+        .vacation-excel-month .excel-day-cell.previous-year { background: #e36d09; }
+        .vacation-excel-month .excel-day-cell.half-day { background: #92cddc; }
         .vacation-excel-month .excel-day-cell.weekend { background: #ffffff; }
 
         col.person { width: 140px; }
@@ -3423,6 +3794,10 @@ qs("#vacationMapTeamFilter")?.addEventListener("change", renderVacationMap);
 qs("#printVacationMapButton")?.addEventListener("click", printVacationMap);
 qs("#exportVacationMapPdfButton")?.addEventListener("click", exportVacationMapPdf);
 qs("#exportVacationMapExcelButton")?.addEventListener("click", exportVacationMapExcel);
+qs("#closeVacationLegendButton")?.addEventListener("click", () => qs("#vacationLegendDialog")?.close());
+qs("#addVacationLegendItemButton")?.addEventListener("click", addVacationLegendItem);
+qs("#vacationLegendForm")?.addEventListener("submit", saveVacationLegend);
+qs("#closeVacationCellButton")?.addEventListener("click", () => qs("#vacationCellDialog")?.close());
 qs("#recordForm").addEventListener("submit", handleSubmit);
 qs("#closeDialogButton").addEventListener("click", () => qs("#recordDialog").close());
 qs("#cancelDialogButton").addEventListener("click", () => qs("#recordDialog").close());
@@ -3446,6 +3821,27 @@ document.addEventListener("click", (event) => {
   if (!target.closest(".notification-wrap")) qs("#notificationPanel").hidden = true;
   if (target.closest("[data-notification-open]")) {
     openNotification(target.closest("[data-notification-open]").dataset.notificationOpen);
+    return;
+  }
+  if (target.closest("[data-vacation-map-cell]")) {
+    editVacationMapCell(target.closest("[data-vacation-map-cell]"));
+    return;
+  }
+  if (target.closest("[data-edit-vacation-legend]")) {
+    openVacationLegendEditor();
+    return;
+  }
+  if (target.closest("[data-vacation-cell-option]")) {
+    saveVacationMapCellSelection(target.closest("[data-vacation-cell-option]").dataset.vacationCellOption);
+    return;
+  }
+  if (target.closest("[data-vacation-cell-clear]")) {
+    saveVacationMapCellSelection("");
+    return;
+  }
+  if (target.closest("[data-delete-vacation-legend]")) {
+    vacationMapLegendItems().splice(Number(target.closest("[data-delete-vacation-legend]").dataset.deleteVacationLegend), 1);
+    renderVacationLegendEditor();
     return;
   }
   const action = [
@@ -3511,6 +3907,12 @@ document.addEventListener("change", (event) => {
   if (event.target.closest("#scheduleDialog")) saveSchedule();
   if (event.target.closest("#planningDialog")) savePlanningField(event.target);
 });
+
+document.addEventListener("blur", (event) => {
+  if (event.target.matches("[data-vacation-doc-field], [data-vacation-legend-index]")) {
+    saveVacationMapDocumentField(event.target);
+  }
+}, true);
 
 qs("#closeScheduleButton").addEventListener("click", () => qs("#scheduleDialog").close());
 qs("#printScheduleButton").addEventListener("click", () => printDocument("schedule"));

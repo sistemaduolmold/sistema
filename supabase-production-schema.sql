@@ -44,6 +44,7 @@ create table if not exists public.users (
   team text not null default '',
   department text not null default '',
   phone text not null default '',
+  admission_date date,
   position text not null default '',
   status text not null default 'Ativo',
   password text not null default '',
@@ -217,77 +218,9 @@ begin
 end;
 $$;
 
-insert into public.companies (id, name, address, postal_code, tax_id)
-values
-  ('empresa-1', 'Duomoldes - Industria de Moldes, Lda.', 'Zona Industrial de Oliveira de Azemeis', '3720-602', 'PT000000000'),
-  ('empresa-2', 'Cliente Internacional', 'Rua Principal', '1000-000', 'PT111111111')
-on conflict (id) do nothing;
-
-insert into public.clients (id, company_id, name, email, phone)
-values
-  ('client-ana', 'empresa-1', 'Ana Martins', 'ana.martins@duomoldes.pt', '910000001'),
-  ('client-carlos', 'empresa-2', 'Carlos Silva', 'carlos.silva@example.com', '910000002')
-on conflict (id) do nothing;
-
 insert into public.users (id, name, email, profile, role, team, department, password, active)
 values
   ('user-admin', 'Administrador', 'admin@duomoldes.pt', 'Admin', 'Admin', 'Gestao', 'Administracao', 'admin123', true),
   ('user-rh', 'Recursos Humanos', 'rh@duomoldes.pt', 'RH', 'RH', 'RH', 'Recursos Humanos', 'rh123', true),
   ('user-funcionario', 'Joao Ferreira', 'joao.ferreira@duomoldes.pt', 'Funcionario', 'Funcionario', 'Producao', 'Moldes', 'func123', true)
-on conflict (id) do nothing;
-
-insert into public.orders (
-  id,
-  client_id,
-  title,
-  description,
-  status,
-  priority,
-  due_date,
-  delivered,
-  created_by,
-  assigned_to,
-  history,
-  schedule,
-  planning,
-  mold_photos
-)
-values
-  (
-    'order-1',
-    'client-ana',
-    'Molde tecnico A',
-    'Projeto inicial para validacao.',
-    'Em curso',
-    'Alta',
-    '2026-06-15',
-    false,
-    'user-admin',
-    'user-funcionario',
-    '[]'::jsonb,
-    '{}'::jsonb,
-    null,
-    '[]'::jsonb
-  ),
-  (
-    'order-2',
-    'client-carlos',
-    'Atualizacao da encomenda',
-    'Nota manual: Envio 3D',
-    'Aberta',
-    'Media',
-    '2026-07-05',
-    false,
-    'user-admin',
-    'user-funcionario',
-    '[]'::jsonb,
-    '{}'::jsonb,
-    null,
-    '[]'::jsonb
-  )
-on conflict (id) do nothing;
-
-insert into public.absences (id, user_id, date, reason, status, delivered, attachments)
-values
-  ('abs-1', 'user-funcionario', '2026-05-29', 'Atualizacao da encomenda', 'Pendente', false, '[]'::jsonb)
 on conflict (id) do nothing;
