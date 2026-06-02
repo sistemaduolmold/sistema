@@ -1301,6 +1301,26 @@ td small {
   color: var(--muted);
 }
 
+.vacation-extra-control {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin-top: 7px;
+  color: var(--muted);
+  font-size: 0.78rem;
+  white-space: nowrap;
+}
+
+.vacation-extra-control select {
+  min-height: 30px;
+  padding: 3px 7px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--ink);
+  font: inherit;
+}
+
 tr:last-child td {
   border-bottom: 0;
 }

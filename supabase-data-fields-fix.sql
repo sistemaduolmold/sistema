@@ -14,15 +14,32 @@ alter table public.clients
   add column if not exists password text not null default '',
   add column if not exists role text not null default '',
   add column if not exists owner text not null default 'Admin',
+  add column if not exists portal_document text not null default 'Cronograma',
+  add column if not exists portal_language text not null default 'Português',
   add column if not exists status text not null default 'Ativo',
   add column if not exists notes text not null default '';
+
+update public.clients
+set portal_document = 'Cronograma'
+where portal_document not in ('Cronograma', 'Planeamento');
+
+alter table public.clients
+  drop constraint if exists clients_portal_document_check,
+  add constraint clients_portal_document_check check (portal_document in ('Cronograma', 'Planeamento')),
+  drop constraint if exists clients_portal_language_check,
+  add constraint clients_portal_language_check check (portal_language in ('Português', 'Inglês'));
 
 alter table public.users
   add column if not exists employee_number text not null default '',
   add column if not exists phone text not null default '',
   add column if not exists admission_date date,
+  add column if not exists vacation_request_extra_days integer not null default 0,
   add column if not exists position text not null default '',
   add column if not exists status text not null default 'Ativo';
+
+alter table public.users
+  drop constraint if exists users_vacation_request_extra_days_check,
+  add constraint users_vacation_request_extra_days_check check (vacation_request_extra_days between 0 and 3);
 
 alter table public.orders
   add column if not exists reference text not null default '',
@@ -46,9 +63,7 @@ alter table public.vacations
 
 alter table public.vacations
   drop constraint if exists vacations_days_check,
-  add constraint vacations_days_check check (days >= 0 and days <= 11);
-
-alter table public.vacations
+  add constraint vacations_days_check check (days >= 0 and days <= 30),
   drop constraint if exists vacations_origin_check,
   add constraint vacations_origin_check check (
     origin in ('Admin/RH', 'Funcionario', 'Compensacao de falta', 'Compensação de falta')

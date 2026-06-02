@@ -1,7 +1,8 @@
 ﻿const storageKey = "duomold-demo-v3";
 
 const maxVacationRequestDays = 11;
-const annualVacationDays = 22;
+const employeeVacationRequestDays = 11;
+const adminVacationDays = 30;
 const firstYearVacationDays = 6;
 
 const demoData = {
@@ -159,6 +160,7 @@ let dialogMode = "client";
 let editingId = null;
 let dialogAttachments = [];
 let isLoggedIn = false;
+let adminSessionAccount = "";
 let supabaseClient = null;
 let supabaseSaveTimer = null;
 const orderNotificationTimers = new Map();
@@ -195,6 +197,31 @@ const titles = {
   absences: ["Faltas", "Registo e validação de faltas."]
 };
 
+const clientPortalTranslations = {
+  Português: {
+    navOrders: "Meu pedido", navProfile: "Perfil", notifications: "Notificações", markRead: "Marcar lidas",
+    exportData: "Exportar dados", portalTitle: "Portal do cliente:", portalDescription: "O cliente acompanha apenas as suas encomendas e as atualizações colocadas pelo Admin.",
+    order: "Encomenda", status: "Estado", progress: "Progresso", forecast: "Previsão", weeklyUpdate: "Atualização semanal",
+    editProfile: "Editar perfil", changePassword: "Alterar senha", profileInformation: "Informações do perfil",
+    portalPageTitle: "Meu pedido", portalPageSubtitle: "Acompanhamento das suas encomendas.", profilePageTitle: "Perfil", profilePageSubtitle: "Informações do perfil atual.",
+    planning: "Planeamento", schedule: "Cronograma", noDocuments: "Sem documentos liberados", noWeeklyUpdate: "Sem atualização semanal", logout: "Sair",
+    clientSessionHint: "Pode acompanhar as suas encomendas", emptyNotifications: "Sem notificações.", orderUpdated: "Encomenda atualizada",
+    client: "Cliente", clientName: "Nome do cliente", company: "Empresa", vat: "NIF", email: "Email", phone: "Telefone",
+    position: "Cargo/Função", city: "Cidade", sector: "Setor", address: "Morada", profileStatus: "Estado"
+  },
+  Inglês: {
+    navOrders: "My order", navProfile: "Profile", notifications: "Notifications", markRead: "Mark as read",
+    exportData: "Export data", portalTitle: "Client portal:", portalDescription: "The client can view only their orders and the updates added by the Admin.",
+    order: "Order", status: "Status", progress: "Progress", forecast: "Forecast", weeklyUpdate: "Weekly update",
+    editProfile: "Edit profile", changePassword: "Change password", profileInformation: "Profile information",
+    portalPageTitle: "My order", portalPageSubtitle: "Track your orders.", profilePageTitle: "Profile", profilePageSubtitle: "Current profile information.",
+    planning: "Planning", schedule: "Schedule", noDocuments: "No documents available", noWeeklyUpdate: "No weekly update", logout: "Logout",
+    clientSessionHint: "You can track your orders", emptyNotifications: "No notifications.", orderUpdated: "Order updated",
+    client: "Client", clientName: "Client name", company: "Company", vat: "VAT number", email: "Email", phone: "Phone",
+    position: "Position", city: "City", sector: "Sector", address: "Address", profileStatus: "Status"
+  }
+};
+
 const forms = {
   client: [
     ["name", "Nome do cliente", "text", true],
@@ -208,6 +235,8 @@ const forms = {
     ["status", "Estado", "select:Ativo|Prospecto|Inativo"],
     ["owner", "Responsável", "text"],
     ["role", "Função/Cargo", "text"],
+    ["portalDocument", "Documento disponível para o cliente", "select:Cronograma|Planeamento"],
+    ["portalLanguage", "Idioma do portal do cliente", "select:Português|Inglês"],
     ["address", "Morada da Empresa", "textarea"],
     ["notes", "Observações", "textarea"]
   ],
@@ -225,7 +254,7 @@ const forms = {
     ["clientId", "Cliente", "client", true],
     ["reference", "Referência/OS", "text", true],
     ["title", "Titulo", "text", true],
-    ["status", "Estado", "select:Recebido|Em análise|Em produção|Aguardando 3D peça final do cliente|Aguardando nota de encomenda do cliente|Aguardando outros dados técnicos do cliente|Concluído|Entregue"],
+    ["status", "Estado", "select:Recebido|Em análise|Em produção|1º Ensaio Realizado|Aguardando 3D peça final do cliente|Aguardando nota de encomenda do cliente|Aguardando outros dados técnicos do cliente|Concluído|Entregue"],
     ["progress", "Progresso (%)", "number", true],
     ["dueDate", "Previsão de entrega", "date"],
     ["description", "Descrição", "textarea"],
@@ -349,7 +378,7 @@ function cleanVacationRecords(vacations, users = []) {
     .filter((vacation) => vacation.userId && validUserIds.has(vacation.userId))
     .map((vacation) => ({
       ...vacation,
-      days: String(Math.min(Number(vacation.days || 0), maxVacationRequestDays))
+      days: String(Math.min(Number(vacation.days || 0), adminVacationDays))
     }));
 }
 
@@ -573,8 +602,9 @@ function setView(view) {
     button.hidden = !allowedViews().includes(button.dataset.view) || !roleAllowed;
     button.classList.toggle("active", button.dataset.view === currentView);
   });
-  qs("#pageTitle").textContent = titles[currentView][0];
-  qs("#pageSubtitle").textContent = titles[currentView][1];
+  const portalText = clientPortalText();
+  qs("#pageTitle").textContent = isClient() && currentView === "clientPortal" ? portalText.portalPageTitle : isClient() && currentView === "profile" ? portalText.profilePageTitle : titles[currentView][0];
+  qs("#pageSubtitle").textContent = isClient() && currentView === "clientPortal" ? portalText.portalPageSubtitle : isClient() && currentView === "profile" ? portalText.profilePageSubtitle : titles[currentView][1];
   qs("#newRecordButton").textContent = actionLabel();
   qs("#newRecordButton").hidden = !canCreateHere();
 }
@@ -622,6 +652,7 @@ function render() {
   qs("#appShell").hidden = !isLoggedIn;
   if (!isLoggedIn) return;
   renderAccountSelector();
+  renderClientLanguage();
   renderDashboard();
   renderRolePages();
   renderNotifications();
@@ -638,14 +669,29 @@ function render() {
 
 function renderAccountSelector() {
   const accountSwitcher = qs(".account-switcher");
-  if (accountSwitcher) accountSwitcher.hidden = role() !== "Admin";
+  if (accountSwitcher) accountSwitcher.hidden = !adminSessionAccount;
   const options = [
     ...state.users.map((user) => ({ value: `user:${user.id}`, label: `${user.name} - ${user.role}` })),
     ...state.clients.map((client) => ({ value: `client:${client.id}`, label: `${client.name} - Cliente` }))
   ];
+  if (adminSessionAccount && !options.some((option) => option.value === adminSessionAccount)) {
+    options.unshift({ value: adminSessionAccount, label: "Administrador - Admin" });
+  }
   qs("#demoAccountSelect").innerHTML = options.map((option) => `<option value="${option.value}" ${state.activeAccount === option.value ? "selected" : ""}>${esc(option.label)}</option>`).join("");
   qs("#currentSessionName").textContent = isClient() ? `${currentClient()?.name || "Cliente"} - Cliente` : `${currentUser()?.name || "Utilizador"} - ${role()}`;
-  qs("#sessionHint").textContent = isClient() ? "Pode acompanhar as suas encomendas" : role() === "Funcionario" ? "Pode pedir férias e registar faltas" : "Pode gerir e validar informacao";
+  qs("#sessionHint").textContent = isClient() ? clientPortalText().clientSessionHint : role() === "Funcionario" ? "Pode pedir férias e registar faltas" : "Pode gerir e validar informacao";
+}
+
+function clientPortalText() {
+  return clientPortalTranslations[isClient() && currentClient()?.portalLanguage === "Inglês" ? "Inglês" : "Português"];
+}
+
+function renderClientLanguage() {
+  const portalText = clientPortalText();
+  qsa("[data-client-i18n]").forEach((element) => {
+    const translated = portalText[element.dataset.clientI18n];
+    if (translated) element.textContent = translated;
+  });
 }
 
 async function loginWithCredentials(event) {
@@ -673,6 +719,7 @@ async function loginWithCredentials(event) {
   }
   if (supabaseLogin) await loadCoreDataFromSupabase();
   state.activeAccount = user ? `user:${user.id}` : `client:${client.id}`;
+  adminSessionAccount = user?.role === "Admin" ? `user:${user.id}` : "";
   persistStateOnly();
   isLoggedIn = true;
   qs("#loginAlert").textContent = "";
@@ -683,6 +730,7 @@ async function loginWithCredentials(event) {
 
 function logout() {
   isLoggedIn = false;
+  adminSessionAccount = "";
   qsa("dialog[open]").forEach((dialog) => dialog.close());
   render();
 }
@@ -727,6 +775,7 @@ function importSupabaseUser(row) {
     password: row.password || "",
     phone: row.phone || "",
     admissionDate: row.admission_date || "",
+    vacationRequestExtraDays: Number(row.vacation_request_extra_days || 0),
     role: row.profile || row.role || "Funcionario",
     department: row.department || "",
     position: row.position || "",
@@ -762,6 +811,8 @@ function importSupabaseClient(row) {
     phone: row.phone || "",
     role: row.role || "",
     owner: row.owner || "Admin",
+    portalDocument: row.portal_document || "Cronograma",
+    portalLanguage: row.portal_language || "Português",
     status: row.status || "Ativo",
     notes: row.notes || ""
   };
@@ -848,6 +899,8 @@ function mapClientFromSupabase(row) {
     phone: row.phone || "",
     role: row.role || "",
     owner: row.owner || "Admin",
+    portalDocument: row.portal_document || "Cronograma",
+    portalLanguage: row.portal_language || "Português",
     status: row.status || "Ativo",
     notes: row.notes || ""
   };
@@ -861,6 +914,8 @@ function mapUserFromSupabase(row) {
     email: row.email || "",
     password: row.password || "",
     phone: row.phone || "",
+    admissionDate: row.admission_date || "",
+    vacationRequestExtraDays: Number(row.vacation_request_extra_days || 0),
     role: row.profile || row.role || "Funcionario",
     department: row.department || "",
     position: row.position || "",
@@ -969,6 +1024,8 @@ function clientToSupabase(client) {
     phone: client.phone || "",
     role: client.role || "",
     owner: client.owner || "Admin",
+    portal_document: client.portalDocument || "Cronograma",
+    portal_language: client.portalLanguage || "Português",
     status: client.status || "Ativo",
     notes: client.notes || ""
   };
@@ -983,6 +1040,7 @@ function userToSupabase(user) {
     password: user.password || "",
     phone: user.phone || "",
     admission_date: user.admissionDate || null,
+    vacation_request_extra_days: Number(user.vacationRequestExtraDays || 0),
     profile: user.role || "Funcionario",
     role: user.role || "Funcionario",
     department: user.department || "",
@@ -1089,7 +1147,7 @@ function renderRolePages() {
   const employeeId = currentUser()?.id || "user-funcionario";
   const currentVacationYear = new Date().getFullYear();
   const vacations = state.vacations.filter((item) => item.userId === employeeId && Number(String(item.startDate || "").slice(0, 4)) === currentVacationYear);
-  const employeeAllowance = vacationAllowance(employeeId);
+  const employeeAllowance = vacationAllowance(employeeId, currentVacationYear, "Funcionario");
   const approved = sum(vacations.filter((item) => item.status === "Aprovado" && item.origin === "Funcionario"));
   const pending = sum(vacations.filter((item) => item.status === "Pendente" && item.origin === "Funcionario"));
   text("#employeeApprovedDays", approved);
@@ -1150,14 +1208,15 @@ function renderOrders() {
 
 function renderClientPortal() {
   const clientId = currentClient()?.id;
+  const portalText = clientPortalText();
   const rows = state.orders.filter((order) => order.clientId === clientId);
   table("#clientOrdersTable", rows, (order) => `
     <tr>
       <td><strong>${esc(order.reference)}</strong><small>${esc(order.title)}</small></td>
-      <td><span class="status ${cls(order.status)}">${esc(order.status)}</span></td>
+      <td><span class="status ${cls(order.status)}">${esc(clientPortalStatus(order.status))}</span></td>
       <td><strong>${esc(order.progress)}%</strong><small>${esc(order.description || "")}</small></td>
       <td>${date(order.dueDate)}</td>
-      <td>${esc(order.weeklyUpdate || "Sem atualização semanal")}</td>
+      <td>${esc(order.weeklyUpdate || portalText.noWeeklyUpdate)}</td>
       <td><div class="row-actions">${clientDocumentButtons(order)}</div></td>
     </tr>`);
 }
@@ -1166,7 +1225,8 @@ function renderProfile() {
   const record = currentAccountRecord();
   if (!record) return;
   const company = isClient() ? companyForClient(record) : {};
-  const profileLabel = isClient() ? "Cliente" : role();
+  const portalText = clientPortalText();
+  const profileLabel = isClient() ? portalText.client : role();
   text("#profileInitial", (record.name || profileLabel || "D").trim().slice(0, 1).toUpperCase());
   text("#profileRole", profileLabel);
   text("#profileName", record.name || "Sem nome");
@@ -1174,16 +1234,16 @@ function renderProfile() {
 
   const items = isClient()
     ? [
-        ["Nome do cliente", record.name],
-        ["Empresa", company.name],
-        ["NIF", company.vat],
-        ["Email", record.email],
-        ["Telefone", record.phone || company.phone],
-        ["Cargo/Função", record.role],
-        ["Cidade", company.city],
-        ["Setor", company.sector],
-        ["Morada", company.address],
-        ["Estado", record.status]
+        [portalText.clientName, record.name],
+        [portalText.company, company.name],
+        [portalText.vat, company.vat],
+        [portalText.email, record.email],
+        [portalText.phone, record.phone || company.phone],
+        [portalText.position, record.role],
+        [portalText.city, company.city],
+        [portalText.sector, company.sector],
+        [portalText.address, company.address],
+        [portalText.profileStatus, clientPortalStatus(record.status)]
       ]
     : [
         ["Nome", record.name],
@@ -1221,6 +1281,7 @@ function visibleNotifications() {
 }
 
 function renderNotifications() {
+  const portalText = clientPortalText();
   const items = visibleNotifications();
   const unread = items.filter((item) => !item.read).length;
   const count = qs("#notificationCount");
@@ -1228,11 +1289,11 @@ function renderNotifications() {
   count.textContent = unread;
   qs("#notificationList").innerHTML = items.length ? items.slice(0, 12).map((item) => `
     <button class="notification-item ${item.read ? "" : "unread"}" data-notification-open="${item.id}" type="button">
-      <strong>${esc(item.title)}</strong>
+      <strong>${esc(isClient() && item.recordType === "order" ? portalText.orderUpdated : item.title)}</strong>
       <p>${esc(item.message)}</p>
       <small>${dateTime(item.createdAt)}</small>
     </button>
-  `).join("") : `<div class="empty-state small">Sem notificações.</div>`;
+  `).join("") : `<div class="empty-state small">${esc(portalText.emptyNotifications)}</div>`;
 }
 
 function addNotification({ to, title, message, link = "", recordType = "", recordId = "" }) {
@@ -1292,10 +1353,74 @@ function notificationTargetView(notification) {
 }
 
 function clientDocumentButtons(order) {
+  const portalText = clientPortalText();
+  const preference = currentClient()?.portalDocument || "Cronograma";
   const buttons = [];
-  if ((order.showPlanningToClient || "Sim") === "Sim") buttons.push(`<button class="row-action" data-planning-order="${order.id}">Planeamento</button>`);
-  if ((order.showScheduleToClient || "Sim") === "Sim") buttons.push(`<button class="row-action" data-schedule-order="${order.id}">Cronograma</button>`);
-  return buttons.length ? buttons.join("") : `<span class="muted-cell">Sem documentos liberados</span>`;
+  if (preference === "Planeamento" && (order.showPlanningToClient || "Sim") === "Sim") buttons.push(`<button class="row-action" data-planning-order="${order.id}">${esc(portalText.planning)}</button>`);
+  if (preference === "Cronograma" && (order.showScheduleToClient || "Sim") === "Sim") buttons.push(`<button class="row-action" data-schedule-order="${order.id}">${esc(portalText.schedule)}</button>`);
+  return buttons.length ? buttons.join("") : `<span class="muted-cell">${esc(portalText.noDocuments)}</span>`;
+}
+
+function clientPortalStatus(status) {
+  if (currentClient()?.portalLanguage !== "Inglês") return status;
+  return {
+    Recebido: "Received",
+    "Em análise": "Under review",
+    "Em produção": "In production",
+    "1º Ensaio Realizado": "1st trial completed",
+    "Aguardando 3D peça final do cliente": "Waiting for final client 3D part",
+    "Aguardando nota de encomenda do cliente": "Waiting for client purchase order",
+    "Aguardando outros dados técnicos do cliente": "Waiting for other client technical data",
+    "Concluído": "Completed",
+    Entregue: "Delivered",
+    Ativo: "Active",
+    Inativo: "Inactive",
+    Prospecto: "Prospect"
+  }[status] || status;
+}
+
+function documentText() {
+  const english = isClient() && currentClient()?.portalLanguage === "Inglês";
+  return english ? {
+    schedule: "Schedule", planning: "Planning", clientView: "Client view", adminEdit: "Admin editing",
+    print: "Print", downloadPdf: "Download PDF", renumberIds: "Renumber IDs", newTask: "New task", newGroup: "New group", newField: "New field", clear: "Clear",
+    scheduleTitle: "Mold Construction Schedule", page: "Page 1 of 1", moldNumber: "Mold number", customerMoldNumber: "Customer mold number",
+    week: "Week", projectProgress: "Project Progress", operations: "Operations", evolution: "Progress (%)", planned: "Planned", completed: "Completed",
+    otherCharacteristics: "Other characteristics", partReference: "Part reference", injectionWeight: "Injection weight (g)", cavities: "Number of cavities",
+    toolWeight: "Tool weight", dimensions: "Dimensions", lifetime: "Life time (cycles)", remarks: "Remarks", client: "Client", date: "Date",
+    moldPhotos: "Mold photos", moldPhotosSubtitle: "Product manufacturing period images", addPhoto: "Add photo", noPhotos: "No photos added.",
+    photoDescription: "Description / Written option", planningTitle: "Mold Planning - MOD.54.01",
+    columns: "Columns: ID - Task Name - Duration - Start - Completion - Project Percentage", project: "Project", mold: "Mold No.", taskName: "Task Name",
+    duration: "Duration", start: "Start", completion: "Completion", projectPercentage: "Project Percentage", actions: "Actions", observations: "Remarks",
+    readonlyNote: "Client view. Editing is available only to the Admin.", fieldsNote: "Created fields appear as columns in the worksheet."
+  } : {
+    schedule: "Cronograma", planning: "Planeamento", clientView: "Visualização do cliente", adminEdit: "Edição do admin",
+    print: "Imprimir", downloadPdf: "Download PDF", renumberIds: "Renumerar IDs", newTask: "Nova tarefa", newGroup: "Novo grupo", newField: "Novo campo", clear: "Limpar",
+    scheduleTitle: "Cronograma Construção de Molde", page: "Página 1 de 1", moldNumber: "N. Molde", customerMoldNumber: "Nº Molde Cliente",
+    week: "Semana", projectProgress: "Percentagem do Projeto", operations: "Operações", evolution: "Evolução (%)", planned: "Programado", completed: "Realizado",
+    otherCharacteristics: "Outras características", partReference: "Ref. Peça", injectionWeight: "Peso Moldação (g)", cavities: "N. cavidades",
+    toolWeight: "Peso Molde", dimensions: "Dimensões", lifetime: "Tempo de vida (ciclos)", remarks: "Observações", client: "Cliente", date: "Data",
+    moldPhotos: "Fotos do molde", moldPhotosSubtitle: "Imagens do período de produção do produto", addPhoto: "Adicionar foto", noPhotos: "Sem fotos adicionadas.",
+    photoDescription: "Descrição / Opção escrita", planningTitle: "Planeamento do Molde - MOD.54.01",
+    columns: "Colunas: ID - Nome da Tarefa - Duração - Início - Conclusão - Percentagem do Projeto", project: "Projeto", mold: "N. Molde", taskName: "Nome da Tarefa",
+    duration: "Duração", start: "Início", completion: "Conclusão", projectPercentage: "Percentagem do Projeto", actions: "Ações", observations: "Observações",
+    readonlyNote: "Visualização do cliente. A edição fica disponível apenas para Admin.", fieldsNote: "Os campos criados aparecem como colunas dentro da planilha."
+  };
+}
+
+function renderDocumentDialogLanguage(type, readonly, reference = "") {
+  const labels = documentText();
+  const planning = type === "planning";
+  text(planning ? "#planningDialogTitle" : "#scheduleDialogTitle", `${planning ? labels.planning : labels.schedule} - ${reference}`);
+  text(planning ? "#planningDialogMode" : "#scheduleDialogMode", readonly ? labels.clientView : labels.adminEdit);
+  text(planning ? "#printPlanningButton" : "#printScheduleButton", labels.print);
+  text(planning ? "#exportPlanningButton" : "#exportScheduleButton", labels.downloadPdf);
+  if (!planning) return;
+  text("#renumberPlanningButton", labels.renumberIds);
+  text("#addPlanningTaskButton", labels.newTask);
+  text("#addPlanningGroupButton", labels.newGroup);
+  text("#addPlanningFieldButton", labels.newField);
+  text("#clearPlanningButton", labels.clear);
 }
 
 function renderUsers() {
@@ -1305,14 +1430,16 @@ function renderUsers() {
   if (addButton) addButton.hidden = !canManageUsers();
   table("#usersTable", rows, (user) => {
     const allowance = vacationAllowance(user.id);
-    const total = vacationDaysUsed(user.id);
+    const requestAllowance = vacationAllowance(user.id, new Date().getFullYear(), "Funcionario");
+    const total = vacationTotalMarkedDays(user.id);
+    const extraDays = vacationRequestExtraDays(user.id);
     return `<tr>
       <td><strong>${esc(user.name)}</strong><small>${esc(user.position || "Sem cargo")}</small></td>
       <td><strong>${esc(user.employeeNumber || "Sem matrícula")}</strong></td>
       <td><span class="status ${cls(user.role)}">${esc(user.role)}</span></td>
       <td><strong>${esc(user.email)}</strong><small>${esc(user.phone || "Sem telefone")}</small></td>
       <td>${esc(user.department || "Sem departamento")}</td>
-      <td><strong>${total}/${allowance} dias</strong><small>Limite anual</small></td>
+      <td><strong>${total}/${allowance} dias</strong><small>Total marcado por Admin/RH</small>${role() !== "Funcionario" ? `<label class="vacation-extra-control">Pedido pessoal: ${requestAllowance} dias<select data-vacation-extra-days="${user.id}" aria-label="Dias adicionais autorizados para ${esc(user.name)}">${[0, 1, 2, 3].map((value) => `<option value="${value}" ${extraDays === value ? "selected" : ""}>+${value} dias</option>`).join("")}</select></label>` : `<small>Pedido pessoal: ${requestAllowance} dias</small>`}</td>
       <td><div class="row-actions">${role() === "Admin" ? `<button class="row-action" data-edit-user="${user.id}">Editar</button><button class="row-action delete" data-delete-user="${user.id}">Apagar</button>` : ""}</div></td>
     </tr>`;
   });
@@ -1527,7 +1654,7 @@ function buildVacationExcelMonthTable(monthName, monthIndex, records, options = 
     const cells = Array.from({ length: daysInMonth }, (_, index) => {
       const iso = isoDate(vacationMapYear, monthIndex + 1, index + 1);
       const cell = vacationMapCellInfo(user.id, iso, monthRecords);
-      const label = cell.value === "N" ? "N" : index + 1;
+      const label = index + 1;
       const editableAttrs = canEditVacationMap() ? `data-vacation-map-cell data-user-id="${esc(user.id)}" data-date="${esc(iso)}"` : "";
       const colorStyle = cell.color ? `style="background:${esc(cell.color)}"` : "";
       return `<td class="excel-day-cell ${cell.className}" ${editableAttrs} ${colorStyle} title="${esc(cell.title)}">${esc(label)}</td>`;
@@ -1619,6 +1746,7 @@ function saveVacationMapCellSelection(legendId = "") {
   const userId = dialog.dataset.userId;
   const iso = dialog.dataset.date;
   const legendItem = vacationMapLegendItems().find((item) => item.id === legendId);
+  const previousOverrides = state.vacationMapOverrides;
   state.vacationMapOverrides = state.vacationMapOverrides.filter((item) => !(item.userId === userId && item.date === iso));
   if (legendItem) {
     state.vacationMapOverrides.push({
@@ -1632,8 +1760,14 @@ function saveVacationMapCellSelection(legendId = "") {
       updatedAt: new Date().toISOString()
     });
   }
+  if (vacationTotalMarkedDays(userId, Number(String(iso).slice(0, 4))) > adminVacationDays) {
+    state.vacationMapOverrides = previousOverrides;
+    alert(`Não é possível marcar mais férias. Este colaborador já atingiu o limite anual de ${adminVacationDays} dias.`);
+    return;
+  }
   dialog.close();
   persistStateOnly();
+  renderUsers();
   renderVacationMap();
 }
 
@@ -1784,7 +1918,9 @@ function dialogTitle(mode, editing) {
 function dialogSubtitle(mode) {
   if (mode === "profileUser" || mode === "profileClient") return "Atualize as informações do perfil atual.";
   if (mode === "client") return "Preencha os dados do cliente e da empresa na mesma ficha.";
-  if (mode === "vacation") return `Escolha as datas. O sistema calcula os dias úteis e limita cada pedido a ${maxVacationRequestDays} dias.`;
+  if (mode === "vacation") return role() === "Funcionario"
+    ? `Escolha as datas. O sistema calcula os dias úteis e limita cada pedido a ${maxVacationRequestDays} dias.`
+    : `Escolha as datas. Marcações manuais de Admin/RH respeitam o limite anual de ${adminVacationDays} dias por colaborador.`;
   if (mode === "absence") return "Registe a falta e indique se ela deve ser compensada com 1 dia de férias.";
   return "Preencha os dados principais.";
 }
@@ -1801,6 +1937,9 @@ function fieldHtml([name, labelText, type, required], record) {
   }
   if (name === "origin" && dialogMode === "vacation" && role() === "Funcionario") {
     return `<label class="field"><span>${labelText}</span><select name="${name}" disabled><option value="Funcionario" selected>Funcionario</option></select><input type="hidden" name="${name}" value="Funcionario"></label>`;
+  }
+  if (name === "status" && dialogMode === "vacation" && role() === "Funcionario") {
+    return `<label class="field"><span>${labelText}</span><select name="${name}" disabled><option value="Pendente" selected>Pendente</option></select><input type="hidden" name="${name}" value="Pendente"></label>`;
   }
   if (type === "attachments" && dialogMode === "absence") return absenceAttachmentsField();
   if (type.startsWith("select:")) return selectField(name, labelText, type.replace("select:", "").split("|").map((item) => [item, item]), valueText, req);
@@ -2015,7 +2154,10 @@ function handleSubmit(event) {
     return;
   }
   if (dialogMode === "vacation") {
-    if (role() === "Funcionario") data.origin = "Funcionario";
+    if (role() === "Funcionario") {
+      data.origin = "Funcionario";
+      data.status = "Pendente";
+    }
     if (!editingId && ["Admin", "RH"].includes(role()) && data.userId === currentUser()?.id) data.status = "Pendente";
     data.mapCode = deriveVacationCode(data);
     const validation = validateVacation(data);
@@ -2124,6 +2266,8 @@ function saveClientWithCompany(data) {
     status: data.status || existingClient?.status || "Ativo",
     owner: data.owner || existingClient?.owner || "Admin",
     role: data.role,
+    portalDocument: data.portalDocument || existingClient?.portalDocument || "Cronograma",
+    portalLanguage: data.portalLanguage || existingClient?.portalLanguage || "Português",
     notes: data.notes
   };
   if (existingClient) Object.assign(existingClient, clientData);
@@ -2250,11 +2394,12 @@ function setupDialogRules(mode) {
   const end = form.elements.endDate;
   const days = form.elements.days;
   const user = form.elements.userId;
+  const origin = form.elements.origin;
   days.readOnly = true;
   days.required = false;
   days.parentElement.insertAdjacentHTML("beforeend", `<small class="field-hint" id="vacationDayHint"></small>`);
   const update = () => updateVacationCalculation();
-  [start, end, user].forEach((field) => field?.addEventListener("change", update));
+  [start, end, user, origin].forEach((field) => field?.addEventListener("change", update));
   update();
 }
 
@@ -2271,32 +2416,40 @@ function updateVacationCalculation() {
     return;
   }
   end.min = start.value;
-  end.max = addDays(start.value, maxVacationRequestDays - 1);
+  const manualEntry = vacationIsManualEntry({
+    origin: form.elements.origin?.value,
+    userId: form.elements.userId?.value
+  });
+  const periodLimit = manualEntry ? adminVacationDays : maxVacationRequestDays;
+  end.max = addDays(start.value, periodLimit - 1);
   if (!end.value || end.value < start.value) end.value = start.value;
   if (end.value > end.max) end.value = end.max;
   let total = businessDays(start.value, end.value);
-  while (total > maxVacationRequestDays) {
+  while (total > periodLimit) {
     end.value = addDays(end.value, -1);
     total = businessDays(start.value, end.value);
   }
   days.value = total || "";
   const vacationYear = Number(String(start.value || today()).slice(0, 4));
-  const allowance = vacationAllowance(form.elements.userId.value, vacationYear);
-  const used = vacationDaysUsed(form.elements.userId.value, editingId, vacationYear);
+  const origin = form.elements.origin?.value || (role() === "Funcionario" ? "Funcionario" : "Admin/RH");
+  const allowance = vacationAllowance(form.elements.userId.value, vacationYear, origin);
+  const used = vacationDaysUsedForAllowance(form.elements.userId.value, editingId, vacationYear, origin);
   const remaining = Math.max(allowance - used - total, 0);
   if (hint) hint.textContent = `Total deste pedido: ${total} dias úteis. Já usados/pendentes: ${used}/${allowance}. Restam após este pedido: ${remaining}.`;
 }
 
 function validateVacation(data) {
   const days = businessDays(data.startDate, data.endDate);
+  const manualEntry = vacationIsManualEntry(data);
+  const periodLimit = manualEntry ? adminVacationDays : maxVacationRequestDays;
   if (!data.startDate || !data.endDate) return { ok: false, message: "Preencha a data inicial e a data final." };
   if (new Date(data.endDate) < new Date(data.startDate)) return { ok: false, message: "A data final não pode ser anterior à data inicial." };
-  if (data.endDate > addDays(data.startDate, maxVacationRequestDays - 1)) return { ok: false, message: `A data final pode ir apenas até ${maxVacationRequestDays} dias corridos a partir da data inicial.` };
+  if (data.endDate > addDays(data.startDate, periodLimit - 1)) return { ok: false, message: `A data final pode ir apenas até ${periodLimit} dias corridos a partir da data inicial.` };
   if (days < 1) return { ok: false, message: "O período precisa ter pelo menos 1 dia útil." };
-  if (days > maxVacationRequestDays) return { ok: false, message: `Cada pedido de férias pode ter no máximo ${maxVacationRequestDays} dias úteis a partir da data inicial.` };
+  if (days > periodLimit) return { ok: false, message: `Este registo de férias pode ter no máximo ${periodLimit} dias úteis a partir da data inicial.` };
   const vacationYear = Number(String(data.startDate || today()).slice(0, 4));
-  const allowance = vacationAllowance(data.userId, vacationYear);
-  const used = vacationDaysUsed(data.userId, editingId, vacationYear);
+  const allowance = vacationAllowance(data.userId, vacationYear, data.origin);
+  const used = vacationDaysUsedForAllowance(data.userId, editingId, vacationYear, data.origin);
   if (used + days > allowance) return { ok: false, message: `Este colaborador já tem ${used} dias usados/pendentes. O limite anual é ${allowance} dias.` };
   return { ok: true, days };
 }
@@ -2311,17 +2464,60 @@ function deriveVacationCode(data = {}) {
   return "F";
 }
 
-function vacationAllowance(userId, year = new Date().getFullYear()) {
-  const user = state.users.find((item) => item.id === userId);
-  const admissionYear = Number(String(user?.admissionDate || "").slice(0, 4));
-  return admissionYear && admissionYear === Number(year) ? firstYearVacationDays : annualVacationDays;
+function vacationRequestExtraDays(userId) {
+  const value = Number(state.users.find((item) => item.id === userId)?.vacationRequestExtraDays || 0);
+  return Math.max(0, Math.min(value, 3));
 }
 
-function vacationDaysUsed(userId, ignoreId = null, year = new Date().getFullYear()) {
+function vacationIsManualEntry(data = {}) {
+  return String(data.origin || "") !== "Funcionario";
+}
+
+function vacationAllowance(userId, year = new Date().getFullYear(), origin = "Admin/RH") {
+  if (String(origin || "") !== "Funcionario") return adminVacationDays;
+  const user = state.users.find((item) => item.id === userId);
+  const admissionYear = Number(String(user?.admissionDate || "").slice(0, 4));
+  const baseDays = admissionYear && admissionYear === Number(year) ? firstYearVacationDays : employeeVacationRequestDays;
+  return baseDays + vacationRequestExtraDays(userId);
+}
+
+function vacationDaysUsedForAllowance(userId, ignoreId = null, year = new Date().getFullYear(), origin = "Admin/RH") {
+  if (String(origin || "") === "Funcionario") return vacationDaysUsed(userId, ignoreId, year, "Funcionario");
+  return vacationTotalMarkedDays(userId, year, ignoreId);
+}
+
+function vacationDaysUsed(userId, ignoreId = null, year = new Date().getFullYear(), origin = "") {
   return state.vacations
     .filter((item) => item.userId === userId && item.id !== ignoreId && item.status !== "Rejeitado")
     .filter((item) => Number(String(item.startDate || "").slice(0, 4)) === Number(year))
+    .filter((item) => !origin || item.origin === origin)
     .reduce((total, item) => total + Number(item.days || 0), 0);
+}
+
+function vacationTotalMarkedDays(userId, year = new Date().getFullYear(), ignoreId = null) {
+  return vacationDaysUsed(userId, ignoreId, year) + vacationMapManualDays(userId, year, ignoreId);
+}
+
+function vacationMapManualDays(userId, year = new Date().getFullYear(), ignoreId = null) {
+  return state.vacationMapOverrides
+    .filter((item) => item.userId === userId && Number(String(item.date || "").slice(0, 4)) === Number(year))
+    .filter((item) => !vacationRecordCoversDate(userId, item.date, ignoreId))
+    .reduce((total, item) => {
+      const code = String(item.code || "").toUpperCase();
+      if (code === "F") return total + 1;
+      if (code === "M") return total + 0.5;
+      return total;
+    }, 0);
+}
+
+function vacationRecordCoversDate(userId, iso, ignoreId = null) {
+  return state.vacations.some((item) => (
+    item.id !== ignoreId
+    && item.userId === userId
+    && item.status !== "Rejeitado"
+    && iso >= String(item.startDate || "")
+    && iso <= String(item.endDate || "")
+  ));
 }
 
 function businessDays(startValue, endValue) {
@@ -2388,7 +2584,7 @@ function defaultRecord(mode) {
   if (mode === "vacation") return { userId: currentUser()?.id || "user-funcionario", origin: role() === "Funcionario" ? "Funcionario" : "Admin/RH", status: role() === "Funcionario" ? "Pendente" : "Aprovado" };
   if (mode === "absence") return { userId: currentUser()?.id || "user-funcionario", type: "Justificada", compensateVacation: "Não", status: "Pendente" };
   if (mode === "user") return { employeeNumber: `COL-${String(state.users.length + 1).padStart(3, "0")}`, admissionDate: "", role: "Funcionario", status: "Ativo" };
-  if (mode === "client") return { companyName: "", status: "Ativo", password: "cliente123" };
+  if (mode === "client") return { companyName: "", status: "Ativo", password: "cliente123", portalDocument: "Cronograma", portalLanguage: "Português" };
   return {};
 }
 
@@ -2533,7 +2729,7 @@ async function exportVacationMapExcel() {
           const iso = isoDate(vacationMapYear, monthIndex + 1, day);
           const info = vacationMapCellInfo(user.id, iso, monthRecords);
           const cell = row.getCell(day + 2);
-          cell.value = info.value === "N" ? "N" : day;
+          cell.value = day;
           cell.fill = excelSolidFill(vacationMapCellColor(info));
         }
       }
@@ -3270,14 +3466,15 @@ function openSchedule(orderId) {
   const order = state.orders.find((item) => item.id === orderId);
   if (!order) return;
   const readonly = isClient();
-  qs("#scheduleDialogTitle").textContent = `Cronograma - ${order.reference}`;
-  qs("#scheduleDialogMode").textContent = readonly ? "Visualizacao do cliente" : "Edicao do admin";
+  renderDocumentDialogLanguage("schedule", readonly, order.reference);
   qs("#scheduleBody").innerHTML = scheduleHtml(order, readonly);
   qs("#scheduleDialog").showModal();
 }
 
 function scheduleHtml(order, readonly) {
   const data = order.schedule || {};
+  const labels = documentText();
+  const english = isClient() && currentClient()?.portalLanguage === "Inglês";
   const disabled = readonly ? "disabled" : "";
   const value = (key, fallback = "") => esc(Object.prototype.hasOwnProperty.call(data, key) ? data[key] : fallback);
   const checked = (key) => data[key] ? "checked" : "";
@@ -3288,8 +3485,8 @@ function scheduleHtml(order, readonly) {
       const doneKey = `${key}_realizado`;
       return `<td class="week-cell">
         <span class="week-split">
-          <label title="Programado"><input data-schedule="${plannedKey}" type="checkbox" ${checked(plannedKey) || checked(key)} ${disabled}><span class="week-half planned"></span></label>
-          <label title="Realizado"><input data-schedule="${doneKey}" type="checkbox" ${checked(doneKey)} ${disabled}><span class="week-half done"></span></label>
+          <label title="${esc(labels.planned)}"><input data-schedule="${plannedKey}" type="checkbox" ${checked(plannedKey) || checked(key)} ${disabled}><span class="week-half planned"></span></label>
+          <label title="${esc(labels.completed)}"><input data-schedule="${doneKey}" type="checkbox" ${checked(doneKey)} ${disabled}><span class="week-half done"></span></label>
         </span>
       </td>`;
     }).join("");
@@ -3297,7 +3494,7 @@ function scheduleHtml(order, readonly) {
       const key = `r${row}_e${percent}`;
       return `<td class="evol"><input data-schedule="${key}" name="evol${row}" type="radio" value="${percent}" ${checked(key)} ${disabled}></td>`;
     }).join("");
-    return `<tr><td class="op-pt">${esc(op[0])}</td><td class="op-en">${esc(op[1])}</td><td class="resp"><input class="resp-input" data-schedule="r${row}_resp" value="${value(`r${row}_resp`, op[2])}" ${disabled}></td>${weeks}${evol}</tr>`;
+    return `<tr><td class="op-pt">${esc(english ? op[1] : op[0])}</td><td class="op-en">${esc(english ? "" : op[1])}</td><td class="resp"><input class="resp-input" data-schedule="r${row}_resp" value="${value(`r${row}_resp`, op[2])}" ${disabled}></td>${weeks}${evol}</tr>`;
   }).join("");
   const weekHeader = Array.from({ length: 16 }, (_, index) => {
     const key = `weekHeader${index + 1}`;
@@ -3308,45 +3505,45 @@ function scheduleHtml(order, readonly) {
     <div class="schedule-page" data-order-id="${order.id}" data-readonly="${readonly}">
       <header class="schedule-header">
         <div><div class="schedule-logo"><span>D</span> DUOMOLD</div><div class="schedule-subtitle">Mold Infinity</div></div>
-        <div><div class="schedule-title">Cronograma Construcao de Molde<small>(Progress Report / Tool identification and property)</small></div><div class="page-no">Pagina 1 de 1</div></div>
+        <div><div class="schedule-title">${esc(labels.scheduleTitle)}<small>(Progress Report / Tool identification and property)</small></div><div class="page-no">${esc(labels.page)}</div></div>
       </header>
 
       <section class="schedule-top-grid">
-        <div><label>N. Molde:<small>Mold number:</small><input data-schedule="moldNumber" value="${value("moldNumber", order.reference)}" ${disabled}></label></div>
-        <div><label>No Molde Cliente:<small>Customer mold number:</small><input data-schedule="customerMoldNumber" value="${value("customerMoldNumber")}" ${disabled}></label></div>
-        <div><label>Week:<input data-schedule="week" value="${value("week")}" ${disabled}></label></div>
-        <div><label>Progressao do projeto:<input value="${esc(order.progress || "0")}% " disabled></label></div>
+        <div><label>${esc(labels.moldNumber)}:<input data-schedule="moldNumber" value="${value("moldNumber", order.reference)}" ${disabled}></label></div>
+        <div><label>${esc(labels.customerMoldNumber)}:<input data-schedule="customerMoldNumber" value="${value("customerMoldNumber")}" ${disabled}></label></div>
+        <div><label>${esc(labels.week)}:<input data-schedule="week" value="${value("week")}" ${disabled}></label></div>
+        <div><label>${esc(labels.projectProgress)}:<input value="${esc(order.progress || "0")}% " disabled></label></div>
       </section>
 
       <table class="schedule-table">
         <colgroup><col style="width:19%"><col style="width:19%"><col style="width:5.3%"><col span="16" style="width:2.85%"><col span="4" style="width:3.8%"></colgroup>
         <thead>
-          <tr><th colspan="2" rowspan="2">Operacoes / Operations</th><th rowspan="2">Resp.</th><th colspan="16">Semana / Week</th><th colspan="4">Evolucao (%)</th></tr>
+          <tr><th colspan="2" rowspan="2">${esc(labels.operations)}</th><th rowspan="2">Resp.</th><th colspan="16">${esc(labels.week)}</th><th colspan="4">${esc(labels.evolution)}</th></tr>
           <tr>${weekHeader}${[25, 50, 75, 100].map((item) => `<th>${item}</th>`).join("")}</tr>
         </thead>
         <tbody>${rows}</tbody>
       </table>
       <div class="schedule-legend">
-        <span><i class="legend-box planned"></i>Programado</span>
-        <span><i class="legend-box done"></i>Realizado</span>
+        <span><i class="legend-box planned"></i>${esc(labels.planned)}</span>
+        <span><i class="legend-box done"></i>${esc(labels.completed)}</span>
       </div>
 
-      <div class="schedule-section-title">Outras caracteristicas:<small>Other characteristics:</small></div>
+      <div class="schedule-section-title">${esc(labels.otherCharacteristics)}:</div>
       <div class="schedule-chars">
-        <div>Ref. Peca:<small>Part reference:</small><input data-schedule="partReference" value="${value("partReference")}" ${disabled}></div>
-        <div>Peso Moldacao (g):<small>Injection weight (g):</small><input data-schedule="injectionWeight" value="${value("injectionWeight")}" ${disabled}></div>
-        <div>N. cavidades:<small>Number of cavities:</small><input data-schedule="cavities" value="${value("cavities")}" ${disabled}></div>
-        <div>Peso Molde:<small>Tool weight:</small><input data-schedule="toolWeight" value="${value("toolWeight")}" ${disabled}></div>
-        <div>Dimensoes:<small>Dimensions:</small><input data-schedule="dimensions" value="${value("dimensions")}" ${disabled}></div>
-        <div>Tempo de vida (ciclos):<small>Life time:</small><input data-schedule="lifetime" value="${value("lifetime")}" ${disabled}></div>
+        <div>${esc(labels.partReference)}:<input data-schedule="partReference" value="${value("partReference")}" ${disabled}></div>
+        <div>${esc(labels.injectionWeight)}:<input data-schedule="injectionWeight" value="${value("injectionWeight")}" ${disabled}></div>
+        <div>${esc(labels.cavities)}:<input data-schedule="cavities" value="${value("cavities")}" ${disabled}></div>
+        <div>${esc(labels.toolWeight)}:<input data-schedule="toolWeight" value="${value("toolWeight")}" ${disabled}></div>
+        <div>${esc(labels.dimensions)}:<input data-schedule="dimensions" value="${value("dimensions")}" ${disabled}></div>
+        <div>${esc(labels.lifetime)}:<input data-schedule="lifetime" value="${value("lifetime")}" ${disabled}></div>
       </div>
-      <div class="schedule-remarks"><div class="remarks-title">Observacoes:<small>Remarks:</small></div><textarea data-schedule="remarks" ${disabled}>${value("remarks")}</textarea></div>
+      <div class="schedule-remarks"><div class="remarks-title">${esc(labels.remarks)}:</div><textarea data-schedule="remarks" ${disabled}>${value("remarks")}</textarea></div>
 
       ${moldPhotosHtml(order, readonly, "schedule")}
 
       <div class="signatures">
-        <div class="sig"><div class="sig-title">DUOMOLD, Lda.</div><div class="line"></div><div class="date-row">Data: <input data-schedule="duoDay" value="${value("duoDay")}" ${disabled}> / <input data-schedule="duoMonth" value="${value("duoMonth")}" ${disabled}> / <input data-schedule="duoYear" value="${value("duoYear")}" ${disabled}></div></div>
-        <div class="sig"><div class="sig-title">Cliente</div><div class="line"></div><div class="date-row">Data: <input data-schedule="clientDay" value="${value("clientDay")}" ${disabled}> / <input data-schedule="clientMonth" value="${value("clientMonth")}" ${disabled}> / <input data-schedule="clientYear" value="${value("clientYear")}" ${disabled}></div></div>
+        <div class="sig"><div class="sig-title">DUOMOLD, Lda.</div><div class="line"></div><div class="date-row">${esc(labels.date)}: <input data-schedule="duoDay" value="${value("duoDay")}" ${disabled}> / <input data-schedule="duoMonth" value="${value("duoMonth")}" ${disabled}> / <input data-schedule="duoYear" value="${value("duoYear")}" ${disabled}></div></div>
+        <div class="sig"><div class="sig-title">${esc(labels.client)}</div><div class="line"></div><div class="date-row">${esc(labels.date)}: <input data-schedule="clientDay" value="${value("clientDay")}" ${disabled}> / <input data-schedule="clientMonth" value="${value("clientMonth")}" ${disabled}> / <input data-schedule="clientYear" value="${value("clientYear")}" ${disabled}></div></div>
       </div>
       <footer class="schedule-footer">MOD.55.01</footer>
     </div>`;
@@ -3382,25 +3579,27 @@ function moldPhotos(order) {
 
 function moldPhotosHtml(order, readonly, context) {
   const photos = moldPhotos(order);
-  const empty = readonly ? "Sem fotos adicionadas." : "Ainda sem fotos. Carregue imagens PNG ou JPEG do período de produção.";
+  const labels = documentText();
+  const empty = readonly ? labels.noPhotos : "Ainda sem fotos. Carregue imagens PNG ou JPEG do período de produção.";
   return `
     <section class="mold-photos" data-photo-context="${context}">
       <div class="mold-photos-header">
         <div>
-          <h3>Fotos do molde</h3>
-          <small>Imagens do período de produção do produto</small>
+          <h3>${esc(labels.moldPhotos)}</h3>
+          <small>${esc(labels.moldPhotosSubtitle)}</small>
         </div>
-        ${readonly ? "" : `<label class="photo-upload-button">Adicionar foto<input data-photo-upload="${context}" type="file" accept="image/png,image/jpeg" hidden></label>`}
+        ${readonly ? "" : `<label class="photo-upload-button">${esc(labels.addPhoto)}<input data-photo-upload="${context}" type="file" accept="image/png,image/jpeg" hidden></label>`}
       </div>
       ${photos.length ? `<div class="mold-photo-grid">${photos.map((photo) => moldPhotoCard(photo, readonly)).join("")}</div>` : `<p class="photo-empty">${empty}</p>`}
     </section>`;
 }
 
 function moldPhotoCard(photo, readonly) {
+  const labels = documentText();
   return `
     <article class="mold-photo-card" data-photo-id="${photo.id}">
       <img src="${esc(photo.src)}" alt="${esc(photo.caption || "Foto do molde")}">
-      <label>Descrição / Opção escrita
+      <label>${esc(labels.photoDescription)}
         <textarea data-photo-caption="${photo.id}" ${readonly ? "disabled" : ""}>${esc(photo.caption || "")}</textarea>
       </label>
       ${readonly ? "" : `<button class="planning-mini red" data-photo-delete="${photo.id}" type="button">X</button>`}
@@ -3510,8 +3709,7 @@ function openPlanning(orderId) {
   const order = state.orders.find((item) => item.id === orderId);
   if (!order) return;
   const readonly = isClient();
-  qs("#planningDialogTitle").textContent = `Planeamento - ${order.reference}`;
-  qs("#planningDialogMode").textContent = readonly ? "Visualizacao do cliente" : "Edicao do admin";
+  renderDocumentDialogLanguage("planning", readonly, order.reference);
   qs("#planningBody").innerHTML = planningHtml(order, readonly);
   ["#renumberPlanningButton", "#addPlanningTaskButton", "#addPlanningGroupButton", "#addPlanningFieldButton", "#clearPlanningButton"].forEach((selector) => {
     qs(selector).hidden = readonly;
@@ -3521,6 +3719,7 @@ function openPlanning(orderId) {
 
 function planningHtml(order, readonly) {
   const data = planningFor(order);
+  const labels = documentText();
   const disabled = readonly ? "disabled" : "";
   const readonlyClass = readonly ? " readonly" : "";
   const field = (key) => esc(data[key] ?? "");
@@ -3534,19 +3733,19 @@ function planningHtml(order, readonly) {
     <div class="planning-page${readonlyClass}" data-order-id="${order.id}" data-readonly="${readonly}">
       <header class="planning-header">
         <div>
-          <h2>Planeamento do Molde - MOD.54.01</h2>
-          <p>Colunas: ID - Nome da Tarefa - Duracao - Inicio - Conclusao - Porcentagem do projeto</p>
+          <h2>${esc(labels.planningTitle)}</h2>
+          <p>${esc(labels.columns)}</p>
         </div>
       </header>
 
       <section class="planning-card">
         <div class="planning-grid">
-          <label>Projecto<input data-planning-field="projeto" value="${field("projeto")}" ${disabled}></label>
-          <label>Cliente<input data-planning-field="cliente" value="${field("cliente")}" ${disabled}></label>
-          <label>N. Molde<input data-planning-field="molde" value="${field("molde")}" ${disabled}></label>
-          <label>Data<input data-planning-field="data" type="date" value="${field("data")}" ${disabled}></label>
+          <label>${esc(labels.project)}<input data-planning-field="projeto" value="${field("projeto")}" ${disabled}></label>
+          <label>${esc(labels.client)}<input data-planning-field="cliente" value="${field("cliente")}" ${disabled}></label>
+          <label>${esc(labels.mold)}<input data-planning-field="molde" value="${field("molde")}" ${disabled}></label>
+          <label>${esc(labels.date)}<input data-planning-field="data" type="date" value="${field("data")}" ${disabled}></label>
         </div>
-        ${readonly ? `<p class="planning-note">Visualizacao do cliente. A edicao fica disponivel apenas para Admin.</p>` : `<p class="planning-note">Os campos criados aparecem como colunas dentro da planilha.</p>`}
+        <p class="planning-note">${esc(readonly ? labels.readonlyNote : labels.fieldsNote)}</p>
       </section>
 
       <section class="planning-table-box">
@@ -3554,13 +3753,13 @@ function planningHtml(order, readonly) {
           <thead>
             <tr>
               <th class="planning-id">ID</th>
-              <th class="planning-name">Nome da Tarefa</th>
-              <th class="planning-duration">Duracao</th>
-              <th class="planning-date">Inicio</th>
-              <th class="planning-date">Conclusao</th>
-              <th class="planning-status">Porcentagem do projeto</th>
+              <th class="planning-name">${esc(labels.taskName)}</th>
+              <th class="planning-duration">${esc(labels.duration)}</th>
+              <th class="planning-date">${esc(labels.start)}</th>
+              <th class="planning-date">${esc(labels.completion)}</th>
+              <th class="planning-status">${esc(labels.projectPercentage)}</th>
               ${extraHeaders}
-              ${readonly ? "" : `<th class="planning-actions-col">Acoes</th>`}
+              ${readonly ? "" : `<th class="planning-actions-col">${esc(labels.actions)}</th>`}
             </tr>
           </thead>
           <tbody>${rows}</tbody>
@@ -3568,7 +3767,7 @@ function planningHtml(order, readonly) {
       </section>
 
       <section class="planning-card">
-        <label>Observacoes<textarea data-planning-field="observacoes" ${disabled}>${field("observacoes")}</textarea></label>
+        <label>${esc(labels.observations)}<textarea data-planning-field="observacoes" ${disabled}>${field("observacoes")}</textarea></label>
       </section>
       ${moldPhotosHtml(order, readonly, "planning")}
       <footer class="planning-footer">MOD.54.01</footer>
@@ -3576,12 +3775,13 @@ function planningHtml(order, readonly) {
 }
 
 function planningRowHtml(line, index, fields, disabled, readonly) {
+  const labels = documentText();
   const extras = fields.map((_, extraIndex) => `<td><input data-planning-row="${index}" data-planning-extra="${extraIndex}" value="${esc(line.extras?.[extraIndex] || "")}" ${disabled}></td>`).join("");
   return `
     <tr class="${planningStatusClass(line.tipo || line.status)}">
       <td><input data-planning-row="${index}" data-planning-prop="id" value="${esc(line.id)}" ${disabled}></td>
       <td><input data-planning-row="${index}" data-planning-prop="nome" value="${esc(line.nome)}" ${disabled}></td>
-      <td><input data-planning-row="${index}" data-planning-prop="duracao" value="${esc(line.duracao)}" placeholder="Ex.: 5 dias" ${disabled}></td>
+      <td><input data-planning-row="${index}" data-planning-prop="duracao" value="${esc(line.duracao)}" placeholder="${esc(labels.duration === "Duration" ? "Ex.: 5 days" : "Ex.: 5 dias")}" ${disabled}></td>
       <td><input data-planning-row="${index}" data-planning-prop="inicio" type="date" value="${esc(line.inicio)}" ${disabled}></td>
       <td><input data-planning-row="${index}" data-planning-prop="conclusao" type="date" value="${esc(line.conclusao)}" ${disabled}></td>
       <td><input data-planning-row="${index}" data-planning-prop="status" value="${esc(line.status || "0%")}" placeholder="Ex.: 50%" ${disabled}></td>
@@ -3772,6 +3972,7 @@ qsa(".nav-item").forEach((button) => button.addEventListener("click", () => {
 }));
 qsa("[data-view-jump]").forEach((button) => button.addEventListener("click", () => setView(button.dataset.viewJump)));
 qs("#demoAccountSelect").addEventListener("change", (event) => {
+  if (!adminSessionAccount) return;
   state.activeAccount = event.target.value;
   saveState();
   setView(defaultView());
@@ -3892,6 +4093,14 @@ document.addEventListener("input", (event) => {
 });
 
 document.addEventListener("change", (event) => {
+  if (event.target.matches("[data-vacation-extra-days]")) {
+    const user = state.users.find((item) => item.id === event.target.dataset.vacationExtraDays);
+    if (user && ["Admin", "RH"].includes(role())) {
+      user.vacationRequestExtraDays = Math.max(0, Math.min(Number(event.target.value || 0), 3));
+      saveState();
+    }
+    return;
+  }
   if (event.target.matches("[data-photo-upload]")) {
     handlePhotoUpload(event.target);
     return;
@@ -3950,7 +4159,7 @@ function buildSchedulePdfLines(order) {
     `Titulo: ${order.title || ""}`,
     `Cliente: ${clientName(order.clientId)}`,
     `Mold number: ${schedule.moldNumber || order.reference || ""}`,
-    `Progressao: ${schedule.progress || order.progress || "0"}%`,
+    `Progressão: ${schedule.progress || order.progress || "0"}%`,
     "",
     "Resumo dos campos:"
   ];
@@ -3979,13 +4188,13 @@ function buildPlanningPdfLines(order) {
     "Linhas:"
   ];
   data.linhas.forEach((line) => {
-    lines.push(`${line.id}. ${line.nome} | Duracao: ${line.duracao || ""} | Inicio: ${line.inicio || ""} | Conclusao: ${line.conclusao || ""} | Progresso: ${line.status || ""}`);
+    lines.push(`${line.id}. ${line.nome} | Duração: ${line.duracao || ""} | Início: ${line.inicio || ""} | Conclusão: ${line.conclusao || ""} | Progresso: ${line.status || ""}`);
     if (Array.isArray(line.extras) && line.extras.length) {
       lines.push(`   Extras: ${line.extras.map((item, index) => `${data.campos[index]?.nome || `Campo ${index + 1}`}: ${item || ""}`).join(" ; ")}`);
     }
   });
   if (data.observacoes) {
-    lines.push("", "Observacoes:", data.observacoes);
+    lines.push("", "Observações:", data.observacoes);
   }
   return lines;
 }
@@ -4141,7 +4350,7 @@ function drawScheduleSummary(page, data, order, width, y) {
     { label: "N. Molde", value: data.moldNumber || order.reference || "", width: 180 },
     { label: "No Molde Cliente", value: data.customerMoldNumber || "", width: 180 },
     { label: "Week", value: data.week || "", width: 140 },
-    { label: "Progressao do projeto", value: `${order.progress || "0"}%`, width: 180 }
+    { label: "Percentagem do Projeto", value: `${order.progress || "0"}%`, width: 180 }
   ];
   return drawInfoGrid(page, cols, 22, y);
 }
@@ -4206,7 +4415,7 @@ function drawPlanningTablePages(page, data, width, height, yStart, pages) {
       y = 86;
     }
     currentPage.rect(margin, y + 4, width - margin * 2, 40, { fill: "FAFAFA", stroke: true });
-    currentPage.text(margin + 6, y + 16, "Observacoes", { size: 9, bold: true });
+    currentPage.text(margin + 6, y + 16, "Observações", { size: 9, bold: true });
     currentPage.text(margin + 6, y + 29, notes, { size: 9, width: width - margin * 2 - 12 });
     y += 52;
   }
@@ -4280,7 +4489,7 @@ function drawScheduleDetails(page, data, width, height, y) {
   if (data.remarks) {
     const remarksTop = boxTop + 52;
     page.rect(margin, remarksTop, width - margin * 2, 42, { fill: "FFFFFF", stroke: true });
-    page.text(margin + 6, remarksTop + 12, "Observacoes", { size: 9, bold: true });
+    page.text(margin + 6, remarksTop + 12, "Observações", { size: 9, bold: true });
     page.text(margin + 6, remarksTop + 26, data.remarks, { size: 9, width: width - margin * 2 - 12 });
   }
   const sigTop = boxTop + 100;
@@ -4297,10 +4506,10 @@ function buildPlanningColumns(data) {
   const base = [
     { label: "ID", width: 30 },
     { label: "Nome da Tarefa", width: 210 },
-    { label: "Duracao", width: 58 },
-    { label: "Inicio", width: 72 },
-    { label: "Conclusao", width: 72 },
-    { label: "Porcentagem", width: 56 }
+    { label: "Duração", width: 58 },
+    { label: "Início", width: 72 },
+    { label: "Conclusão", width: 72 },
+    { label: "Percentagem do Projeto", width: 56 }
   ];
   const remaining = 796 - base.reduce((sum, col) => sum + col.width, 0);
   const extraWidth = data.campos?.length ? Math.max(54, Math.min(92, Math.floor(remaining / data.campos.length))) : 0;
@@ -4495,20 +4704,22 @@ function exportSchedule() {
 
   const doc = new jsPDF({ orientation: "landscape", unit: "mm", format: "a4" });
   const data = order.schedule || {};
+  const labels = documentText();
+  const english = isClient() && currentClient()?.portalLanguage === "Inglês";
   const pageWidth = doc.internal.pageSize.getWidth();
   const pageHeight = doc.internal.pageSize.getHeight();
   const margin = 10;
 
-  addPdfHeader(doc, pageWidth, "DUOMOLD", "Cronograma de Molde", "Progress Report / Tool identification and property");
+  addPdfHeader(doc, pageWidth, "DUOMOLD", labels.scheduleTitle, "Progress Report / Tool identification and property");
   addPdfInfoRow(doc, [
-    ["N. Molde", data.moldNumber || order.reference || ""],
-    ["No Molde Cliente", data.customerMoldNumber || ""],
-    ["Week", data.week || ""],
-    ["Progressao do projeto", `${order.progress || "0"}%`]
+    [labels.moldNumber, data.moldNumber || order.reference || ""],
+    [labels.customerMoldNumber, data.customerMoldNumber || ""],
+    [labels.week, data.week || ""],
+    [labels.projectProgress, `${order.progress || "0"}%`]
   ], margin, 24);
 
   const body = scheduleOperations.map((op, rowIndex) => {
-    const row = [`${rowIndex + 1}. ${op[0] || ""}`, op[1] || "", data[`r${rowIndex}_resp`] || op[2] || ""];
+    const row = [`${rowIndex + 1}. ${english ? op[1] || "" : op[0] || ""}`, english ? "" : op[1] || "", data[`r${rowIndex}_resp`] || op[2] || ""];
     for (let week = 1; week <= 16; week += 1) {
       const weekValue = data[`r${rowIndex}_w${week}`];
       const legacyValue = data[`r${rowIndex}_w${week}_programado`] || data[`r${rowIndex}_w${week}_realizado`] ? "X" : "";
@@ -4519,7 +4730,7 @@ function exportSchedule() {
   });
 
   const head = [
-    ["ID / Operacoes", "Nome / Operations", "Resp.", ...Array.from({ length: 16 }, (_, index) => data[`weekHeader${index + 1}`] || String(index + 1)), "25", "50", "75", "100"]
+    [`ID / ${labels.operations}`, labels.operations, "Resp.", ...Array.from({ length: 16 }, (_, index) => data[`weekHeader${index + 1}`] || String(index + 1)), "25", "50", "75", "100"]
   ];
   const columnStyles = {
     0: { cellWidth: 28 },
@@ -4543,7 +4754,7 @@ function exportSchedule() {
     columnStyles,
     didDrawPage: (hookData) => {
       if (hookData.pageNumber === 1) return;
-      addPdfHeader(doc, pageWidth, "DUOMOLD", "Cronograma de Molde", "Progress Report / Tool identification and property");
+      addPdfHeader(doc, pageWidth, "DUOMOLD", labels.scheduleTitle, "Progress Report / Tool identification and property");
     }
   });
 
@@ -4554,12 +4765,12 @@ function exportSchedule() {
     y = 18;
   }
   addPdfInfoGrid(doc, [
-    ["Ref. Peca", data.partReference || ""],
-    ["Peso Moldacao (g)", data.injectionWeight || ""],
-    ["N. cavidades", data.cavities || ""],
-    ["Peso Molde", data.toolWeight || ""],
-    ["Dimensoes", data.dimensions || ""],
-    ["Tempo de vida (ciclos)", data.lifetime || ""]
+    [labels.partReference, data.partReference || ""],
+    [labels.injectionWeight, data.injectionWeight || ""],
+    [labels.cavities, data.cavities || ""],
+    [labels.toolWeight, data.toolWeight || ""],
+    [labels.dimensions, data.dimensions || ""],
+    [labels.lifetime, data.lifetime || ""]
   ], margin, y, pageWidth - margin * 2);
 
   y += 28;
@@ -4569,7 +4780,7 @@ function exportSchedule() {
     doc.rect(margin, y, pageWidth - margin * 2, Math.max(10, lines.length * 4 + 6));
     doc.setFontSize(8);
     doc.setFont("helvetica", "bold");
-    doc.text("Observacoes", margin + 2, y + 4);
+    doc.text(normalizePdfText(labels.remarks), margin + 2, y + 4);
     doc.setFont("helvetica", "normal");
     doc.text(lines, margin + 2, y + 8);
     y += Math.max(12, lines.length * 4 + 8);
@@ -4582,10 +4793,10 @@ function exportSchedule() {
   doc.setFontSize(8);
   doc.setFont("helvetica", "bold");
   doc.text("DUOMOLD, Lda.", margin + 2, y + 5);
-  doc.text("Cliente", margin + sigWidth + 6, y + 5);
+  doc.text(normalizePdfText(labels.client), margin + sigWidth + 6, y + 5);
   doc.setFont("helvetica", "normal");
-  doc.text("Data: ____ / ____ / ____", margin + 2, y + 12);
-  doc.text("Data: ____ / ____ / ____", margin + sigWidth + 6, y + 12);
+  doc.text(`${normalizePdfText(labels.date)}: ____ / ____ / ____`, margin + 2, y + 12);
+  doc.text(`${normalizePdfText(labels.date)}: ____ / ____ / ____`, margin + sigWidth + 6, y + 12);
 
   doc.save(`cronograma-${order.reference || "molde"}.pdf`);
 }
@@ -4601,20 +4812,21 @@ function exportPlanning() {
 
   const doc = new jsPDF({ orientation: "landscape", unit: "mm", format: "a4" });
   const data = planningFor(order);
+  const labels = documentText();
   const pageWidth = doc.internal.pageSize.getWidth();
   const pageHeight = doc.internal.pageSize.getHeight();
   const margin = 10;
 
-  addPdfHeader(doc, pageWidth, "DUOMOLD", "Planeamento do Molde", "Tabela de acompanhamento do projeto");
+  addPdfHeader(doc, pageWidth, "DUOMOLD", labels.planningTitle, labels.columns);
   addPdfInfoRow(doc, [
-    ["Projeto", data.projeto || order.reference || ""],
-    ["Cliente", data.cliente || clientName(order.clientId)],
-    ["N. Molde", data.molde || ""],
-    ["Data", data.data || today()]
+    [labels.project, data.projeto || order.reference || ""],
+    [labels.client, data.cliente || clientName(order.clientId)],
+    [labels.mold, data.molde || ""],
+    [labels.date, data.data || today()]
   ], margin, 24);
 
   const extraLabels = (data.campos || []).map((campo) => normalizePdfText(campo.nome || "Campo"));
-  const head = [["ID", "Nome da Tarefa", "Duracao", "Inicio", "Conclusao", "Porcentagem", ...extraLabels]];
+  const head = [["ID", labels.taskName, labels.duration, labels.start, labels.completion, labels.projectPercentage, ...extraLabels]];
   const body = data.linhas.map((line) => [
     line.id || "",
     line.nome || "",
@@ -4649,7 +4861,7 @@ function exportPlanning() {
     columnStyles,
     didDrawPage: (hookData) => {
       if (hookData.pageNumber === 1) return;
-      addPdfHeader(doc, pageWidth, "DUOMOLD", "Planeamento do Molde", "Tabela de acompanhamento do projeto");
+      addPdfHeader(doc, pageWidth, "DUOMOLD", labels.planningTitle, labels.columns);
     }
   });
 
@@ -4665,7 +4877,7 @@ function exportPlanning() {
     doc.rect(margin, y, pageWidth - margin * 2, Math.max(10, lines.length * 4 + 6));
     doc.setFontSize(8);
     doc.setFont("helvetica", "bold");
-    doc.text("Observacoes", margin + 2, y + 4);
+    doc.text(normalizePdfText(labels.observations), margin + 2, y + 4);
     doc.setFont("helvetica", "normal");
     doc.text(lines, margin + 2, y + 8);
     y += Math.max(12, lines.length * 4 + 8);

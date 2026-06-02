@@ -57,8 +57,8 @@
           <button class="nav-item" data-view="employeePage" type="button">Funcionario</button>
           <button class="nav-item" data-view="clients" type="button">Clientes / Empresas</button>
           <button class="nav-item" data-view="orders" type="button">Encomendas</button>
-          <button class="nav-item" data-view="clientPortal" type="button">Meu pedido</button>
-          <button class="nav-item" data-view="profile" type="button">Perfil</button>
+          <button class="nav-item" data-view="clientPortal" data-client-i18n="navOrders" type="button">Meu pedido</button>
+          <button class="nav-item" data-view="profile" data-client-i18n="navProfile" type="button">Perfil</button>
           <button class="nav-item" data-view="users" type="button">Colaboradores</button>
           <button class="nav-item" data-view="vacations" type="button">Férias</button>
           <button class="nav-item" data-view="absences" type="button">Faltas</button>
@@ -71,7 +71,7 @@
             <strong id="currentSessionName">Admin</strong>
             <small id="sessionHint">Acesso total ao sistema</small>
           </div>
-          <button class="logout-button sidebar-logout" id="logoutButton" type="button">Sair</button>
+          <button class="logout-button sidebar-logout" id="logoutButton" data-client-i18n="logout" type="button">Sair</button>
         </div>
       </aside>
 
@@ -89,13 +89,13 @@
               </button>
               <div class="notification-panel" id="notificationPanel" hidden>
                 <div class="notification-head">
-                  <strong>Notificações</strong>
-                  <button class="text-button" id="markNotificationsReadButton" type="button">Marcar lidas</button>
+                  <strong data-client-i18n="notifications">Notificações</strong>
+                  <button class="text-button" id="markNotificationsReadButton" data-client-i18n="markRead" type="button">Marcar lidas</button>
                 </div>
                 <div id="notificationList" class="notification-list"></div>
               </div>
             </div>
-            <button class="secondary-button" id="exportButton" type="button">Exportar dados</button>
+            <button class="secondary-button" id="exportButton" data-client-i18n="exportData" type="button">Exportar dados</button>
             <button class="primary-button" id="newRecordButton" type="button">Novo cliente</button>
           </div>
         </header>
@@ -164,7 +164,7 @@
             </section>
             <section class="panel">
               <div class="panel-header">
-                <h2>Acoes de administracao</h2>
+                <h2>Ações de administração</h2>
               </div>
               <div class="quick-actions">
                 <button class="secondary-button" data-view-jump="clients" type="button">Criar cliente/login</button>
@@ -312,18 +312,18 @@
 
         <section class="view" id="clientPortalView">
           <div class="policy-strip">
-            <strong>Portal do cliente:</strong>
-            <span>O cliente acompanha apenas as suas encomendas e as atualizacoes colocadas pelo Admin.</span>
+            <strong data-client-i18n="portalTitle">Portal do cliente:</strong>
+            <span data-client-i18n="portalDescription">O cliente acompanha apenas as suas encomendas e as atualizações colocadas pelo Admin.</span>
           </div>
           <div class="table-wrap">
             <table>
               <thead>
                 <tr>
-                  <th>Encomenda</th>
-                  <th>Estado</th>
-                  <th>Progresso</th>
-                  <th>Previsão</th>
-                  <th>Atualização semanal</th>
+                  <th data-client-i18n="order">Encomenda</th>
+                  <th data-client-i18n="status">Estado</th>
+                  <th data-client-i18n="progress">Progresso</th>
+                  <th data-client-i18n="forecast">Previsão</th>
+                  <th data-client-i18n="weeklyUpdate">Atualização semanal</th>
                   <th></th>
                 </tr>
               </thead>
@@ -342,13 +342,13 @@
                 <p id="profileEmail">email@empresa.pt</p>
               </div>
               <div class="profile-card-actions">
-                <button class="secondary-button" id="editProfileButton" type="button">Editar perfil</button>
-                <button class="secondary-button" id="profilePasswordButton" type="button">Alterar senha</button>
+                <button class="secondary-button" id="editProfileButton" data-client-i18n="editProfile" type="button">Editar perfil</button>
+                <button class="secondary-button" id="profilePasswordButton" data-client-i18n="changePassword" type="button">Alterar senha</button>
               </div>
             </section>
             <section class="panel">
               <div class="panel-header">
-                <h2>Informações do perfil</h2>
+                <h2 data-client-i18n="profileInformation">Informações do perfil</h2>
               </div>
               <div class="profile-info-grid" id="profileInfoGrid"></div>
             </section>
@@ -384,7 +384,7 @@
         <section class="view" id="vacationsView">
           <div class="policy-strip">
             <strong>Regra de férias:</strong>
-            <span>Colaboradores admitidos em anos anteriores têm direito a 22 dias. No próprio ano de admissão, o limite é 6 dias; a partir do ano seguinte passa automaticamente para 22 dias. Cada pedido pode ter no máximo 11 dias a partir da data inicial; pedidos do funcionário geram aviso por email para Admin e RH.</span>
+            <span>O colaborador pode pedir pessoalmente até 11 dias por ano. Admin e RH podem autorizar individualmente mais 1, 2 ou 3 dias de pedido. No ano de admissão, o limite pessoal começa nos 6 dias. As restantes férias são marcadas manualmente por Admin/RH, até ao total anual de 30 dias por colaborador.</span>
           </div>
           <div class="list-toolbar">
             <label class="search-box">

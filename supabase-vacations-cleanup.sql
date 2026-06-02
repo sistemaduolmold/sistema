@@ -12,9 +12,9 @@ where id in ('vac-1', 'vac-2')
   );
 
 update public.vacations
-set days = 11
-where days > 11;
+set days = 30
+where days > 30;
 
 alter table public.vacations
   drop constraint if exists vacations_days_check,
-  add constraint vacations_days_check check (days >= 0 and days <= 11);
+  add constraint vacations_days_check check (days >= 0 and days <= 30);
