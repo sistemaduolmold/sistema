@@ -21,7 +21,13 @@ alter table public.clients
 
 update public.clients
 set portal_document = 'Cronograma'
-where portal_document not in ('Cronograma', 'Planeamento');
+where portal_document is null
+   or portal_document not in ('Cronograma', 'Planeamento');
+
+update public.clients
+set portal_language = 'Português'
+where portal_language is null
+   or portal_language not in ('Português', 'Inglês');
 
 alter table public.clients
   drop constraint if exists clients_portal_document_check,

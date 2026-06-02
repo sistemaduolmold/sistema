@@ -9,6 +9,7 @@ const demoData = {
   activeAccount: "user:user-admin",
   companies: [],
   clients: [],
+  clientPortalPreferences: {},
   users: [
     { id: "user-admin", employeeNumber: "ADM-001", name: "Administrador", email: "sistemaduolmold@gmail.com", password: "Admin123!", phone: "+351 900 000 001", admissionDate: "2025-01-01", role: "Admin", department: "Direcao", position: "Administrador", status: "Ativo" },
     { id: "user-rh", employeeNumber: "RH-001", name: "Recursos Humanos", email: "rh@empresa.pt", password: "rh123", phone: "+351 900 000 002", admissionDate: "2025-01-01", role: "RH", department: "Recursos Humanos", position: "Gestor RH", status: "Ativo" },
@@ -343,6 +344,9 @@ function mergeState(saved) {
     if (!Array.isArray(merged[key]) || !merged[key].length) merged[key] = structuredClone(demoData[key]);
   });
   if (!Array.isArray(merged.clients)) merged.clients = structuredClone(demoData.clients);
+  if (!merged.clientPortalPreferences || typeof merged.clientPortalPreferences !== "object" || Array.isArray(merged.clientPortalPreferences)) {
+    merged.clientPortalPreferences = {};
+  }
   if (!Array.isArray(merged.notifications)) merged.notifications = [];
   if (!Array.isArray(merged.vacationMapOverrides)) merged.vacationMapOverrides = [];
   merged.vacationMapDocument = {
@@ -686,6 +690,25 @@ function clientPortalText() {
   return clientPortalTranslations[isClient() && currentClient()?.portalLanguage === "Inglês" ? "Inglês" : "Português"];
 }
 
+function clientPortalPreference(clientId) {
+  const preference = state.clientPortalPreferences?.[clientId] || {};
+  return {
+    portalDocument: preference.portalDocument || "Cronograma",
+    portalLanguage: preference.portalLanguage || "Português"
+  };
+}
+
+function rememberClientPortalPreference(client) {
+  if (!client?.id) return;
+  if (!state.clientPortalPreferences || typeof state.clientPortalPreferences !== "object" || Array.isArray(state.clientPortalPreferences)) {
+    state.clientPortalPreferences = {};
+  }
+  state.clientPortalPreferences[client.id] = {
+    portalDocument: client.portalDocument || "Cronograma",
+    portalLanguage: client.portalLanguage || "Português"
+  };
+}
+
 function renderClientLanguage() {
   const portalText = clientPortalText();
   qsa("[data-client-i18n]").forEach((element) => {
@@ -788,6 +811,7 @@ function importSupabaseUser(row) {
 function importSupabaseClient(row) {
   const companyRow = row.companies || {};
   const companyId = row.company_id || row.companyId || companyRow.id || `empresa-${row.id}`;
+  const portalPreference = clientPortalPreference(row.id);
   if (companyRow.id || row.company_id) {
     upsertById(state.companies, {
       id: companyId,
@@ -811,12 +835,13 @@ function importSupabaseClient(row) {
     phone: row.phone || "",
     role: row.role || "",
     owner: row.owner || "Admin",
-    portalDocument: row.portal_document || "Cronograma",
-    portalLanguage: row.portal_language || "Português",
+    portalDocument: row.portal_document || portalPreference.portalDocument,
+    portalLanguage: row.portal_language || portalPreference.portalLanguage,
     status: row.status || "Ativo",
     notes: row.notes || ""
   };
   upsertById(state.clients, record);
+  rememberClientPortalPreference(record);
   return record;
 }
 
@@ -843,7 +868,11 @@ async function loadCoreDataFromSupabase() {
 
     if (clients.error) console.warn("Nao foi possivel carregar clients.", clients.error);
     // A tabela remota e a fonte unica para nao restaurar clientes apagados a partir do cache local.
-    else state.clients = clients.data.map(mapClientFromSupabase);
+    else {
+      state.clients.forEach(rememberClientPortalPreference);
+      state.clients = clients.data.map(mapClientFromSupabase);
+      state.clients.forEach(rememberClientPortalPreference);
+    }
 
     if (users.error) console.warn("Nao foi possivel carregar users.", users.error);
     else state.users = users.data.map(mapUserFromSupabase);
@@ -890,6 +919,7 @@ function mapCompanyFromSupabase(row) {
 }
 
 function mapClientFromSupabase(row) {
+  const portalPreference = clientPortalPreference(row.id);
   return {
     id: row.id,
     companyId: row.company_id || "",
@@ -899,8 +929,8 @@ function mapClientFromSupabase(row) {
     phone: row.phone || "",
     role: row.role || "",
     owner: row.owner || "Admin",
-    portalDocument: row.portal_document || "Cronograma",
-    portalLanguage: row.portal_language || "Português",
+    portalDocument: row.portal_document || portalPreference.portalDocument,
+    portalLanguage: row.portal_language || portalPreference.portalLanguage,
     status: row.status || "Ativo",
     notes: row.notes || ""
   };
@@ -1440,7 +1470,7 @@ function renderUsers() {
       <td><strong>${esc(user.email)}</strong><small>${esc(user.phone || "Sem telefone")}</small></td>
       <td>${esc(user.department || "Sem departamento")}</td>
       <td><strong>${total}/${allowance} dias</strong><small>Total marcado por Admin/RH</small>${role() !== "Funcionario" ? `<label class="vacation-extra-control">Pedido pessoal: ${requestAllowance} dias<select data-vacation-extra-days="${user.id}" aria-label="Dias adicionais autorizados para ${esc(user.name)}">${[0, 1, 2, 3].map((value) => `<option value="${value}" ${extraDays === value ? "selected" : ""}>+${value} dias</option>`).join("")}</select></label>` : `<small>Pedido pessoal: ${requestAllowance} dias</small>`}</td>
-      <td><div class="row-actions">${role() === "Admin" ? `<button class="row-action" data-edit-user="${user.id}">Editar</button><button class="row-action delete" data-delete-user="${user.id}">Apagar</button>` : ""}</div></td>
+      <td><div class="row-actions">${canManageUsers() ? `<button class="row-action" data-edit-user="${user.id}">Editar</button><button class="row-action delete" data-delete-user="${user.id}">Apagar</button>` : ""}</div></td>
     </tr>`;
   });
 }
@@ -2270,8 +2300,15 @@ function saveClientWithCompany(data) {
     portalLanguage: data.portalLanguage || existingClient?.portalLanguage || "Português",
     notes: data.notes
   };
-  if (existingClient) Object.assign(existingClient, clientData);
-  else state.clients.push({ id: `client-${Date.now()}`, ...clientData });
+  let savedClient;
+  if (existingClient) {
+    Object.assign(existingClient, clientData);
+    savedClient = existingClient;
+  } else {
+    savedClient = { id: `client-${Date.now()}`, ...clientData };
+    state.clients.push(savedClient);
+  }
+  rememberClientPortalPreference(savedClient);
 }
 
 function openPasswordDialog() {
@@ -2593,6 +2630,7 @@ function label(mode) {
 }
 
 async function deleteRecord(mode, id) {
+  if (mode === "user" && !canManageUsers()) return;
   if (!confirm(`Apagar ${label(mode)}?`)) return;
   const key = { client: "clients", company: "companies", order: "orders", user: "users", vacation: "vacations", absence: "absences" }[mode];
   const previousRecords = state[key];
@@ -2606,6 +2644,7 @@ async function deleteRecord(mode, id) {
     render();
     return;
   }
+  if (mode === "client" && state.clientPortalPreferences) delete state.clientPortalPreferences[id];
   saveState();
 }
 
