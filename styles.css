@@ -809,7 +809,7 @@ p {
 }
 
 .vacation-excel-legend-code.weekend {
-  background: #ffffff;
+  background: #66ff00;
 }
 
 .vacation-excel-legend-code.vacation,
@@ -845,8 +845,8 @@ p {
 }
 
 .vacation-map-cell.weekend:not(.code-f):not(.code-bg):not(.code-dc) {
-  background: #ffffff;
-  border-color: #d8dbe1;
+  background: #66ff00;
+  border-color: #2f75b5;
 }
 
 .vacation-map-toolbar {
@@ -1028,7 +1028,7 @@ p {
 }
 
 .vacation-excel-month .excel-day-cell.weekend {
-  background: #ffffff;
+  background: #66ff00;
 }
 
 .vacation-excel-month .excel-day-cell.national-holiday {
@@ -1247,7 +1247,7 @@ p {
 }
 
 .vacation-map-cell.weekend:not(.approved):not(.pending) {
-  background: #f5f6f8;
+  background: #66ff00;
 }
 
 .vacation-map-empty {
@@ -2093,6 +2093,38 @@ dialog {
 
 .planning-status {
   width: 220px;
+}
+
+.planning-save-button {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #ffffff;
+}
+
+.planning-save-button:hover {
+  background: var(--accent-dark);
+  border-color: var(--accent-dark);
+}
+
+.planning-percent-control {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  width: 100%;
+  white-space: nowrap;
+}
+
+.planning-percent-control input {
+  flex: 0 1 72px;
+  width: 72px;
+  min-width: 44px;
+}
+
+.planning-percent-control span {
+  flex: 0 0 auto;
+  color: #111827;
+  font-weight: 800;
+  user-select: none;
 }
 
 .planning-extra {

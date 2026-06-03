@@ -392,7 +392,7 @@
                 <li>o colaborador tem direito a 2 dias de férias até ao máximo de 2 faltas ou 4 meios dias;</li>
                 <li>o colaborador tem direito a 1 dia de férias até ao máximo de 3 faltas ou 6 meios dias.</li>
               </ol>
-              <p>O período anual de férias não poderá exceder os 30 dias úteis de férias marcados no sistema.</p>
+              <p>O período anual de férias não poderá exceder os 25 dias úteis de férias.</p>
               <p>No ano de admissão, o trabalhador tem direito a 2 dias úteis de férias por cada mês de duração do contrato, até 20 dias, que podem ser gozados após 6 meses de execução do contrato. Da aplicação do disposto, os colaboradores não podem gozar, no mesmo ano civil, mais de 30 dias úteis de férias.</p>
             </div>
           </div>
@@ -474,7 +474,10 @@
               <option value="">Todas as equipas</option>
             </select>
           </label>
-          <div></div>
+          <label class="search-box">
+            <span>Ano do mapa</span>
+            <select id="vacationMapYearSelect"></select>
+          </label>
         </div>
         <div id="vacationMap"></div>
       </div>
@@ -593,6 +596,7 @@
             <button class="secondary-button" id="addPlanningGroupButton" type="button">Novo grupo</button>
             <button class="secondary-button" id="addPlanningFieldButton" type="button">Novo campo</button>
             <button class="secondary-button" id="clearPlanningButton" type="button">Limpar</button>
+            <button class="primary-button planning-save-button" id="savePlanningButton" type="button">Guardar</button>
             <button class="icon-button" id="closePlanningButton" type="button" aria-label="Fechar">x</button>
           </div>
         </div>

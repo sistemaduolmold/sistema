@@ -110,7 +110,7 @@ const planningBase = [
   ["Post Tryout Mold Venting", "", "", "", "Tarefa"]
 ].map(([nome, duracao, inicio, conclusao, tipo], index) => ({ id: index + 1, nome, duracao, inicio, conclusao, tipo, status: "0%", extras: [] }));
 
-const vacationMapYear = 2026;
+let vacationMapYear = new Date().getFullYear();
 const vacationMapMonths = [
   "JANEIRO",
   "FEVEREIRO",
@@ -126,25 +126,10 @@ const vacationMapMonths = [
   "DEZEMBRO"
 ];
 const vacationWeekdays = ["D", "S", "T", "Q", "Q", "S", "S"];
-const portugalNationalHolidays = {
-  "2026-01-01": "Ano Novo",
-  "2026-04-03": "Sexta-feira Santa",
-  "2026-04-05": "Domingo de Páscoa",
-  "2026-04-25": "Dia da Liberdade",
-  "2026-05-01": "Dia do Trabalhador",
-  "2026-06-04": "Corpo de Deus",
-  "2026-06-10": "Dia de Portugal",
-  "2026-08-15": "Assunção de Nossa Senhora",
-  "2026-10-05": "Implantação da República",
-  "2026-11-01": "Todos os Santos",
-  "2026-12-01": "Restauração da Independência",
-  "2026-12-08": "Imaculada Conceição",
-  "2026-12-25": "Natal"
-};
 const vacationLegendItems = [
   { id: "national", code: "N", label: "Feriado nacional", className: "national-holiday", color: "#b8cce4" },
   { id: "municipal", code: "N", label: "Feriado municipal", className: "municipal-holiday", color: "#c2d69b" },
-  { id: "weekend", code: "N", label: "Fim-de-semana", className: "weekend", color: "#ffffff" },
+  { id: "weekend", code: "N", label: "Fim-de-semana", className: "weekend", color: "#66ff00" },
   { id: "vacation", code: "F", label: "Férias", className: "vacation", color: "#00b0f0" },
   { id: "blocked", code: "X", label: "Dia a não marcar", className: "blocked-day", color: "#ff0000" },
   { id: "carnival", code: "C", label: "Carnaval", className: "carnival", color: "#ccc0d9" },
@@ -250,7 +235,6 @@ const forms = {
     ["status", "Estado", "select:Ativo|Prospecto|Inativo"],
     ["owner", "Responsável", "text"],
     ["role", "Função/Cargo", "text"],
-    ["portalDocument", "Documento disponível para o cliente", "select:Cronograma|Planeamento"],
     ["portalLanguage", "Idioma do portal do cliente", "select:Português|Inglês"],
     ["address", "Morada da Empresa", "textarea"],
     ["notes", "Observações", "textarea"]
@@ -275,8 +259,7 @@ const forms = {
     ["description", "Descrição", "textarea"],
     ["weeklyUpdate", "Atualização semanal para o cliente", "textarea"],
     ["tasks", "Tarefas internas", "textarea"],
-    ["showPlanningToClient", "Cliente pode visualizar Planeamento", "select:Sim|Não"],
-    ["showScheduleToClient", "Cliente pode visualizar Cronograma", "select:Sim|Não"]
+    ["clientDocumentAccess", "Documento disponível para o cliente", "select:Planeamento|Cronograma|Ambos"]
   ],
   user: [
     ["employeeNumber", "Matrícula", "text", true],
@@ -424,6 +407,7 @@ function normalizeOrderText(order) {
   return {
     ...order,
     status: statusMap[order.status] || order.status,
+    clientDocumentAccess: order.clientDocumentAccess || orderClientDocumentAccess(order),
     showPlanningToClient: order.showPlanningToClient || "Sim",
     showScheduleToClient: order.showScheduleToClient || "Sim",
     history: Array.isArray(order.history) ? order.history.map((entry) => ({
@@ -998,7 +982,7 @@ function mapOrderFromSupabase(row) {
   if (!hasPlanningFlag) delete mapped.showPlanningToClient;
   if (!hasScheduleFlag) delete mapped.showScheduleToClient;
   if (!hasHistory) delete mapped.history;
-  return mapped;
+  return applyOrderClientDocumentAccess(mapped);
 }
 
 function mapVacationFromSupabase(row) {
@@ -1111,8 +1095,8 @@ function orderToSupabase(order) {
     due_date: order.dueDate || null,
     weekly_update: order.weeklyUpdate || "",
     tasks: order.tasks || "",
-    show_planning_to_client: (order.showPlanningToClient || "Sim") === "Sim",
-    show_schedule_to_client: (order.showScheduleToClient || "Sim") === "Sim",
+    show_planning_to_client: ["Planeamento", "Ambos"].includes(order.clientDocumentAccess || orderClientDocumentAccess(order)),
+    show_schedule_to_client: ["Cronograma", "Ambos"].includes(order.clientDocumentAccess || orderClientDocumentAccess(order)),
     history: Array.isArray(order.history) ? order.history : [],
     schedule: order.schedule || {},
     planning: order.planning || null,
@@ -1252,7 +1236,7 @@ function renderOrders() {
       <td><span class="status ${cls(order.status)}">${esc(order.status)}</span></td>
       <td><strong>${esc(order.progress)}%</strong><small>Previsão: ${date(order.dueDate)}</small></td>
       <td>${esc(order.weeklyUpdate || "Sem atualização")}</td>
-      <td><div class="row-actions"><button class="row-action" data-edit-order="${order.id}">Editar</button><button class="row-action" data-planning-order="${order.id}">Planeamento</button><button class="row-action" data-schedule-order="${order.id}">Cronograma</button><button class="row-action delete" data-delete-order="${order.id}">Apagar</button></div></td>
+      <td><div class="row-actions"><button class="row-action" data-edit-order="${esc(order.id)}" type="button">Editar</button><button class="row-action" data-planning-order="${esc(order.id)}" onclick='event.stopPropagation(); openPlanning(${jsArg(order.id)}); return false;' type="button">Planeamento</button><button class="row-action" data-schedule-order="${esc(order.id)}" onclick='event.stopPropagation(); openSchedule(${jsArg(order.id)}); return false;' type="button">Cronograma</button><button class="row-action delete" data-delete-order="${esc(order.id)}" type="button">Apagar</button></div></td>
     </tr>`);
 }
 
@@ -1404,11 +1388,82 @@ function notificationTargetView(notification) {
 
 function clientDocumentButtons(order) {
   const portalText = clientPortalText();
-  const preference = currentClient()?.portalDocument || "Cronograma";
+  const preference = order.clientDocumentAccess || orderClientDocumentAccess(order);
   const buttons = [];
-  if (preference === "Planeamento" && (order.showPlanningToClient || "Sim") === "Sim") buttons.push(`<button class="row-action" data-planning-order="${order.id}">${esc(portalText.planning)}</button>`);
-  if (preference === "Cronograma" && (order.showScheduleToClient || "Sim") === "Sim") buttons.push(`<button class="row-action" data-schedule-order="${order.id}">${esc(portalText.schedule)}</button>`);
+  if (["Planeamento", "Ambos"].includes(preference) && (order.showPlanningToClient || "Sim") === "Sim") buttons.push(`<button class="row-action" data-planning-order="${esc(order.id)}" onclick='event.stopPropagation(); openPlanning(${jsArg(order.id)}); return false;' type="button">${esc(portalText.planning)}</button>`);
+  if (["Cronograma", "Ambos"].includes(preference) && (order.showScheduleToClient || "Sim") === "Sim") buttons.push(`<button class="row-action" data-schedule-order="${esc(order.id)}" onclick='event.stopPropagation(); openSchedule(${jsArg(order.id)}); return false;' type="button">${esc(portalText.schedule)}</button>`);
   return buttons.length ? buttons.join("") : `<span class="muted-cell">${esc(portalText.noDocuments)}</span>`;
+}
+
+function orderClientDocumentAccess(order = {}) {
+  const planning = (order.showPlanningToClient || "Sim") === "Sim";
+  const schedule = (order.showScheduleToClient || "Sim") === "Sim";
+  if (planning && schedule) return "Ambos";
+  if (planning) return "Planeamento";
+  if (schedule) return "Cronograma";
+  return "Cronograma";
+}
+
+function applyOrderClientDocumentAccess(order = {}) {
+  const access = order.clientDocumentAccess || orderClientDocumentAccess(order);
+  order.clientDocumentAccess = access;
+  order.showPlanningToClient = ["Planeamento", "Ambos"].includes(access) ? "Sim" : "Não";
+  order.showScheduleToClient = ["Cronograma", "Ambos"].includes(access) ? "Sim" : "Não";
+  return order;
+}
+
+function canOpenOrderDocument(order, documentType) {
+  if (!order) return false;
+  if (!isClient()) return true;
+  const client = currentClient();
+  if (!client || order.clientId !== client.id) return false;
+  const access = order.clientDocumentAccess || orderClientDocumentAccess(order);
+  if (documentType === "planning") return ["Planeamento", "Ambos"].includes(access) && (order.showPlanningToClient || "Sim") === "Sim";
+  if (documentType === "schedule") return ["Cronograma", "Ambos"].includes(access) && (order.showScheduleToClient || "Sim") === "Sim";
+  return false;
+}
+
+function findOrderById(orderId) {
+  const normalizedId = String(orderId ?? "");
+  if (!normalizedId) return null;
+  return state.orders.find((item) => String(item.id ?? "") === normalizedId) || null;
+}
+
+function closestEventElement(event, selector) {
+  if (event.target instanceof Element) return event.target.closest(selector);
+  return event.composedPath?.().find((item) => item instanceof Element && item.matches(selector)) || null;
+}
+
+function handleOrderDocumentButtonClick(event) {
+  const scheduleButton = closestEventElement(event, "[data-schedule-order]");
+  if (scheduleButton) {
+    event.preventDefault();
+    event.stopPropagation();
+    openSchedule(scheduleButton.dataset.scheduleOrder);
+    return true;
+  }
+  const planningButton = closestEventElement(event, "[data-planning-order]");
+  if (planningButton) {
+    event.preventDefault();
+    event.stopPropagation();
+    openPlanning(planningButton.dataset.planningOrder);
+    return true;
+  }
+  return false;
+}
+
+function openAppDialog(dialog) {
+  if (!dialog) return;
+  if (dialog.open) return;
+  if (typeof dialog.showModal === "function") {
+    try {
+      dialog.showModal();
+      return;
+    } catch (error) {
+      console.warn("Abertura do dialog por showModal falhou; a usar fallback.", error);
+    }
+  }
+  dialog.setAttribute("open", "");
 }
 
 function clientPortalStatus(status) {
@@ -1436,10 +1491,9 @@ function clientPortalStatus(status) {
 }
 
 function documentText() {
-  const english = isClient() && currentClient()?.portalLanguage === "Inglês";
   return english ? {
     schedule: "Schedule", planning: "Planning", clientView: "Client view", adminEdit: "Admin editing",
-    print: "Print", downloadPdf: "Download PDF", renumberIds: "Renumber IDs", newTask: "New task", newGroup: "New group", newField: "New field", clear: "Clear",
+    save: "Save", print: "Print", downloadPdf: "Download PDF", renumberIds: "Renumber IDs", newTask: "New task", newGroup: "New group", newField: "New field", clear: "Clear",
     scheduleTitle: "Mold Construction Schedule", page: "Page 1 of 1", moldNumber: "Mold number", customerMoldNumber: "Customer mold number",
     week: "Week", projectProgress: "Project Progress", operations: "Operations", evolution: "Progress (%)", planned: "Planned", completed: "Completed",
     otherCharacteristics: "Other characteristics", partReference: "Part reference", injectionWeight: "Injection weight (g)", cavities: "Number of cavities",
@@ -1451,7 +1505,7 @@ function documentText() {
     readonlyNote: "Client view. Editing is available only to the Admin.", fieldsNote: "Created fields appear as columns in the worksheet."
   } : {
     schedule: "Cronograma", planning: "Planeamento", clientView: "Visualização do cliente", adminEdit: "Edição do admin",
-    print: "Imprimir", downloadPdf: "Download PDF", renumberIds: "Renumerar IDs", newTask: "Nova tarefa", newGroup: "Novo grupo", newField: "Novo campo", clear: "Limpar",
+    save: "Guardar", print: "Imprimir", downloadPdf: "Download PDF", renumberIds: "Renumerar IDs", newTask: "Nova tarefa", newGroup: "Novo grupo", newField: "Novo campo", clear: "Limpar",
     scheduleTitle: "Cronograma Construção de Molde", page: "Página 1 de 1", moldNumber: "N. Molde", customerMoldNumber: "Nº Molde Cliente",
     week: "Semana", projectProgress: "Percentagem do Projeto", operations: "Operações", evolution: "Evolução (%)", planned: "Programado", completed: "Realizado",
     otherCharacteristics: "Outras características", partReference: "Ref. Peça", injectionWeight: "Peso Moldação (g)", cavities: "N. cavidades",
@@ -1472,6 +1526,7 @@ function renderDocumentDialogLanguage(type, readonly, reference = "") {
   text(planning ? "#printPlanningButton" : "#printScheduleButton", labels.print);
   text(planning ? "#exportPlanningButton" : "#exportScheduleButton", labels.downloadPdf);
   if (!planning) return;
+  text("#savePlanningButton", labels.save);
   text("#renumberPlanningButton", labels.renumberIds);
   text("#addPlanningTaskButton", labels.newTask);
   text("#addPlanningGroupButton", labels.newGroup);
@@ -1550,6 +1605,12 @@ function renderVacationMap() {
     const teams = vacationMapTeams();
     teamFilter.innerHTML = `<option value="">Todas as equipas</option>${teams.map((team) => `<option value="${esc(team)}" ${currentValue === team ? "selected" : ""}>${esc(team)}</option>`).join("")}`;
   }
+  const yearSelect = qs("#vacationMapYearSelect");
+  if (yearSelect) {
+    const currentYear = new Date().getFullYear();
+    const years = Array.from(new Set([2026, currentYear - 1, currentYear, currentYear + 1, vacationMapYear].filter((year) => year >= 2026))).sort((a, b) => a - b);
+    yearSelect.innerHTML = years.map((year) => `<option value="${year}" ${Number(year) === Number(vacationMapYear) ? "selected" : ""}>${year}</option>`).join("");
+  }
   host.innerHTML = buildVacationMapHtml();
 }
 
@@ -1589,7 +1650,23 @@ function vacationMapLegendItems() {
   if (!Array.isArray(doc.legendItems) || !doc.legendItems.length) {
     doc.legendItems = vacationLegendItems.map((item) => ({ ...item }));
   }
+  normalizeVacationLegendItems(doc.legendItems);
   return doc.legendItems;
+}
+
+function normalizeVacationLegendItems(items) {
+  const weekend = items.find((item) => item.id === "weekend");
+  if (weekend) {
+    Object.assign(weekend, {
+      code: "N",
+      label: "Fim-de-semana",
+      className: "weekend",
+      color: "#66ff00"
+    });
+    return;
+  }
+  const municipalIndex = items.findIndex((item) => item.id === "municipal");
+  items.splice(municipalIndex >= 0 ? municipalIndex + 1 : 0, 0, { ...vacationLegendItems.find((item) => item.id === "weekend") });
 }
 
 function buildVacationLegendHtml() {
@@ -1650,20 +1727,21 @@ function vacationMapCellInfo(userId, iso, monthRecords) {
       title: `${userName(userId)} - ${date(iso)} - Manual: ${override.code}`
     };
   }
-  if (portugalNationalHolidays[iso]) {
+  const nationalHoliday = portugalNationalHolidayName(iso);
+  if (nationalHoliday) {
     return {
       value: "N",
       className: "national-holiday",
       color: vacationMapLegendItems().find((item) => item.id === "national")?.color || "#b8cce4",
-      title: `${userName(userId)} - ${date(iso)} - ${portugalNationalHolidays[iso]}`
+      title: `${userName(userId)} - ${date(iso)} - ${nationalHoliday}`
     };
   }
   const item = monthRecords.find((record) => record.userId === userId && iso >= record.startDate && iso <= record.endDate);
   if (item) {
-    const code = vacationCode(item);
+    const code = vacationCode(item, iso);
     return {
       value: code,
-      className: `code-${String(code).toLowerCase()}`,
+      className: vacationMapClassForCode(code),
       color: vacationMapLegendItems().find((legendItem) => legendItem.code === code)?.color || "",
       title: `${userName(userId)} - ${date(iso)} - ${vacationCodeLabel(code)}`
     };
@@ -1672,11 +1750,56 @@ function vacationMapCellInfo(userId, iso, monthRecords) {
     return {
       value: "N",
       className: "weekend",
-      color: vacationMapLegendItems().find((item) => item.id === "weekend")?.color || "#ffffff",
+      color: vacationMapLegendItems().find((item) => item.id === "weekend")?.color || "#66ff00",
       title: `${userName(userId)} - ${date(iso)} - Fim-de-semana`
     };
   }
   return { value: "", className: "", title: `${userName(userId)} - ${date(iso)}` };
+}
+
+function portugalNationalHolidayName(iso) {
+  const year = Number(String(iso || "").slice(0, 4));
+  if (!year) return "";
+  return portugalNationalHolidays(year)[iso] || "";
+}
+
+function portugalNationalHolidays(year) {
+  const easter = easterSunday(year);
+  const goodFriday = addDays(easter, -2);
+  const corpusChristi = addDays(easter, 60);
+  return {
+    [isoDate(year, 1, 1)]: "Ano Novo",
+    [goodFriday]: "Sexta-feira Santa",
+    [easter]: "Domingo de Páscoa",
+    [isoDate(year, 4, 25)]: "Dia da Liberdade",
+    [isoDate(year, 5, 1)]: "Dia do Trabalhador",
+    [corpusChristi]: "Corpo de Deus",
+    [isoDate(year, 6, 10)]: "Dia de Portugal",
+    [isoDate(year, 8, 15)]: "Assunção de Nossa Senhora",
+    [isoDate(year, 10, 5)]: "Implantação da República",
+    [isoDate(year, 11, 1)]: "Todos os Santos",
+    [isoDate(year, 12, 1)]: "Restauração da Independência",
+    [isoDate(year, 12, 8)]: "Imaculada Conceição",
+    [isoDate(year, 12, 25)]: "Natal"
+  };
+}
+
+function easterSunday(year) {
+  const a = year % 19;
+  const b = Math.floor(year / 100);
+  const c = year % 100;
+  const d = Math.floor(b / 4);
+  const e = b % 4;
+  const f = Math.floor((b + 8) / 25);
+  const g = Math.floor((b - f + 1) / 3);
+  const h = (19 * a + b - d - g + 15) % 30;
+  const i = Math.floor(c / 4);
+  const k = c % 4;
+  const l = (32 + 2 * e + 2 * i - h - k) % 7;
+  const m = Math.floor((a + 11 * h + 22 * l) / 451);
+  const month = Math.floor((h + l - 7 * m + 114) / 31);
+  const day = ((h + l - 7 * m + 114) % 31) + 1;
+  return isoDate(year, month, day);
 }
 
 function vacationMapClassForCode(code) {
@@ -1902,12 +2025,25 @@ function vacationTeamName(userId) {
   return state.users.find((user) => user.id === userId)?.department || "Sem equipa";
 }
 
-function vacationCode(item) {
+function vacationCode(item, iso = "") {
+  if (vacationIsPreviousYearEntry(item, iso)) return "A";
   return deriveVacationCode(item);
 }
 
 function vacationCodeLabel(code) {
-  return { F: "F - Férias", BG: "BG - Banco de Horas", DC: "DC - Descanso Compensatório" }[code] || code;
+  return {
+    F: "F - Férias",
+    A: "A - Férias do ano anterior / ano de admissão",
+    BG: "BG - Banco de Horas",
+    DC: "DC - Descanso Compensatório"
+  }[code] || code;
+}
+
+function vacationIsPreviousYearEntry(item, iso = "") {
+  const mapYear = Number(String(iso || item?.startDate || "").slice(0, 4)) || vacationMapYear;
+  const startYear = Number(String(item?.startDate || "").slice(0, 4));
+  const createdYear = Number(String(item?.createdAt || "").slice(0, 4));
+  return (startYear && startYear < mapYear) || (createdYear && createdYear < mapYear && startYear === mapYear);
 }
 
 function vacationMapTeams() {
@@ -1965,6 +2101,7 @@ function openDialog(mode, id = null, defaults = {}) {
   editingId = id;
   const sourceMode = mode === "profileUser" ? "user" : mode === "profileClient" ? "client" : mode;
   const baseRecord = id ? collection(sourceMode).find((item) => item.id === id) : { ...defaultRecord(sourceMode), ...defaults };
+  if (sourceMode === "order" && baseRecord) applyOrderClientDocumentAccess(baseRecord);
   const record = ["client", "profileClient"].includes(mode) ? clientFormRecord(baseRecord || {}) : baseRecord;
   dialogAttachments = mode === "absence" ? cloneAttachments(record?.attachments) : [];
   qs("#dialogTitle").textContent = dialogTitle(mode, Boolean(id));
@@ -2061,7 +2198,7 @@ function orderHistoryItemHtml(entry, orderId = "") {
 }
 
 function refreshOrderHistoryList(orderId) {
-  const order = state.orders.find((item) => item.id === orderId);
+  const order = findOrderById(orderId);
   if (!order) return;
   const list = qs("#orderHistoryList");
   if (!list) return;
@@ -2070,7 +2207,7 @@ function refreshOrderHistoryList(orderId) {
 }
 
 function toggleOrderHistoryStatus(orderId, historyId, delivered) {
-  const order = state.orders.find((item) => item.id === orderId);
+  const order = findOrderById(orderId);
   if (!order || !Array.isArray(order.history)) return;
   const entry = order.history.find((item) => item.id === historyId);
   if (!entry) return;
@@ -2261,12 +2398,13 @@ function handleSubmit(event) {
   let savedRecord = null;
   const previousRecord = editingId ? structuredClone(target.find((item) => item.id === editingId) || null) : null;
   const wasEditing = Boolean(editingId);
+  if (dialogMode === "order") applyOrderClientDocumentAccess(data);
   if (editingId) {
     const index = target.findIndex((item) => item.id === editingId);
     target[index] = { ...target[index], ...data };
     savedRecord = target[index];
   } else {
-    savedRecord = { id: `${dialogMode}-${Date.now()}`, ...data };
+    savedRecord = { id: `${dialogMode}-${Date.now()}`, createdAt: new Date().toISOString(), ...data };
     target.push(savedRecord);
   }
   if (dialogMode === "order") {
@@ -2334,7 +2472,7 @@ function saveClientWithCompany(data) {
     status: data.status || existingClient?.status || "Ativo",
     owner: data.owner || existingClient?.owner || "Admin",
     role: data.role,
-    portalDocument: data.portalDocument || existingClient?.portalDocument || "Cronograma",
+    portalDocument: existingClient?.portalDocument || "Cronograma",
     portalLanguage: data.portalLanguage || existingClient?.portalLanguage || "Português",
     notes: data.notes
   };
@@ -2694,7 +2832,7 @@ function collection(mode) {
 }
 
 function defaultRecord(mode) {
-  if (mode === "order") return { clientId: state.clients[0]?.id, status: "Nota de encomenda recebida", progress: "0", showPlanningToClient: "Sim", showScheduleToClient: "Sim", history: [] };
+  if (mode === "order") return { clientId: state.clients[0]?.id, status: "Nota de encomenda recebida", progress: "0", clientDocumentAccess: "Cronograma", showPlanningToClient: "Não", showScheduleToClient: "Sim", history: [] };
   if (mode === "vacation") return { userId: currentUser()?.id || "user-funcionario", origin: role() === "Funcionario" ? "Funcionario" : "Admin/RH", status: role() === "Funcionario" ? "Pendente" : "Aprovado" };
   if (mode === "absence") return { userId: currentUser()?.id || "user-funcionario", type: "Justificada", compensateVacation: "Não", status: "Pendente" };
   if (mode === "user") return { employeeNumber: `COL-${String(state.users.length + 1).padStart(3, "0")}`, admissionDate: "", role: "Funcionario", status: "Ativo" };
@@ -2882,7 +3020,7 @@ function vacationMapCellColor(info = {}) {
     "code-bg": "#92cddc",
     "code-dc": "#e36d09",
     "national-holiday": "#b8cce4",
-    weekend: "#ffffff"
+    weekend: "#66ff00"
   }[info.className] || "#ffffff";
 }
 
@@ -3063,7 +3201,7 @@ function buildVacationMapExcelHtml(records) {
         .code-f { background: #00b0f0; }
         .code-bg { background: #dbeafe; }
         .code-dc { background: #dcfce7; }
-        .weekend { background: #ffffff; font-weight: 700; text-align: center; }
+        .weekend { background: #66ff00; font-weight: 700; text-align: center; }
         .vacation-excel-legend { display: flex; align-items: stretch; margin-bottom: 12px; border: 0; font-family: Calibri, Arial, sans-serif; font-size: 12px; }
         .vacation-excel-legend-title { width: 76px; }
         .vacation-excel-legend-code { width: 28px; }
@@ -3075,7 +3213,7 @@ function buildVacationMapExcelHtml(records) {
         .vacation-excel-legend-label { justify-content: center; text-align: center; padding: 0 6px; }
         .vacation-excel-legend-code.national-holiday { background: #b8cce4; }
         .vacation-excel-legend-code.municipal-holiday { background: #c2d69b; }
-        .vacation-excel-legend-code.weekend { background: #ffffff; }
+        .vacation-excel-legend-code.weekend { background: #66ff00; }
         .vacation-excel-legend-code.vacation { background: #00b0f0; }
         .vacation-excel-legend-code.blocked-day { background: #ff0000; }
         .vacation-excel-legend-code.carnival { background: #ccc0d9; }
@@ -3100,7 +3238,7 @@ function buildVacationMapExcelHtml(records) {
         .vacation-excel-month .excel-day-cell.carnival { background: #ccc0d9; }
         .vacation-excel-month .excel-day-cell.previous-year { background: #e36d09; }
         .vacation-excel-month .excel-day-cell.half-day { background: #92cddc; }
-        .vacation-excel-month .excel-day-cell.weekend { background: #ffffff; }
+        .vacation-excel-month .excel-day-cell.weekend { background: #66ff00; }
       </style>
     </head>
     <body>
@@ -3136,7 +3274,7 @@ function buildVacationMapPrintableHtml(records) {
           --f: #00b0f0;
           --bg: #dce9ff;
           --dc: #dff4e2;
-          --weekend: #ffffff;
+          --weekend: #66ff00;
         }
 
         @page {
@@ -3270,7 +3408,7 @@ function buildVacationMapPrintableHtml(records) {
         }
 
         .vacation-excel-legend-code.weekend {
-          background: #ffffff;
+          background: #66ff00;
         }
 
         .vacation-excel-legend-code.vacation {
@@ -3420,7 +3558,7 @@ function buildVacationMapPrintableHtml(records) {
         .vacation-excel-month .excel-day-cell.carnival { background: #ccc0d9; }
         .vacation-excel-month .excel-day-cell.previous-year { background: #e36d09; }
         .vacation-excel-month .excel-day-cell.half-day { background: #92cddc; }
-        .vacation-excel-month .excel-day-cell.weekend { background: #ffffff; }
+        .vacation-excel-month .excel-day-cell.weekend { background: #66ff00; }
 
         col.person { width: 140px; }
         col.team { width: 96px; }
@@ -3579,18 +3717,21 @@ function buildVacationMapPdfLines(records) {
 }
 
 function openSchedule(orderId) {
-  const order = state.orders.find((item) => item.id === orderId);
+  const order = findOrderById(orderId);
   if (!order) return;
+  if (!canOpenOrderDocument(order, "schedule")) {
+    alert("Este cronograma não está disponível para este cliente.");
+    return;
+  }
   const readonly = isClient();
   renderDocumentDialogLanguage("schedule", readonly, order.reference);
   qs("#scheduleBody").innerHTML = scheduleHtml(order, readonly);
-  qs("#scheduleDialog").showModal();
+  openAppDialog(qs("#scheduleDialog"));
 }
 
 function scheduleHtml(order, readonly) {
   const data = order.schedule || {};
   const labels = documentText();
-  const english = isClient() && currentClient()?.portalLanguage === "Inglês";
   const disabled = readonly ? "disabled" : "";
   const value = (key, fallback = "") => esc(Object.prototype.hasOwnProperty.call(data, key) ? data[key] : fallback);
   const checked = (key) => data[key] ? "checked" : "";
@@ -3610,7 +3751,7 @@ function scheduleHtml(order, readonly) {
       const key = `r${row}_e${percent}`;
       return `<td class="evol"><input data-schedule="${key}" name="evol${row}" type="radio" value="${percent}" ${checked(key)} ${disabled}></td>`;
     }).join("");
-    return `<tr><td class="op-pt">${esc(english ? op[1] : op[0])}</td><td class="op-en">${esc(english ? "" : op[1])}</td><td class="resp"><input class="resp-input" data-schedule="r${row}_resp" value="${value(`r${row}_resp`, op[2])}" ${disabled}></td>${weeks}${evol}</tr>`;
+    return `<tr><td class="op-pt">${esc(op[0])}</td><td class="op-en">${esc(op[1])}</td><td class="resp"><input class="resp-input" data-schedule="r${row}_resp" value="${value(`r${row}_resp`, op[2])}" ${disabled}></td>${weeks}${evol}</tr>`;
   }).join("");
   const weekHeader = Array.from({ length: 16 }, (_, index) => {
     const key = `weekHeader${index + 1}`;
@@ -3668,7 +3809,7 @@ function scheduleHtml(order, readonly) {
 function saveSchedule() {
   const page = qs(".schedule-page");
   if (!page || page.dataset.readonly === "true") return;
-  const order = state.orders.find((item) => item.id === page.dataset.orderId);
+  const order = findOrderById(page.dataset.orderId);
   if (!order) return;
   order.schedule = {};
   qsa("[data-schedule]", page).forEach((field) => {
@@ -3683,7 +3824,7 @@ function saveSchedule() {
 function exportSchedule() {
   const page = qs(".schedule-page");
   if (!page) return;
-  const order = state.orders.find((item) => item.id === page.dataset.orderId);
+  const order = findOrderById(page.dataset.orderId);
   if (!order) return;
   downloadTextPdf(`cronograma-${order.reference || "molde"}.pdf`, buildSchedulePdfLines(order));
 }
@@ -3725,7 +3866,7 @@ function moldPhotoCard(photo, readonly) {
 function activeDocumentOrder(element) {
   const page = element.closest(".schedule-page, .planning-page");
   if (!page) return {};
-  const order = state.orders.find((item) => item.id === page.dataset.orderId);
+  const order = findOrderById(page.dataset.orderId);
   return { page, order, readonly: page.dataset.readonly === "true", context: page.classList.contains("schedule-page") ? "schedule" : "planning" };
 }
 
@@ -3812,9 +3953,21 @@ function planningFor(order) {
     }
     if (!Array.isArray(line.extras)) line.extras = [];
     while (line.extras.length < order.planning.campos.length) line.extras.push("");
-    line.status = line.statusByDate[planningDate] || "0%";
+    line.status = planningStatusForDate(line, planningDate);
   });
   return order.planning;
+}
+
+function planningStatusForDate(line, planningDate) {
+  const values = line?.statusByDate && typeof line.statusByDate === "object" && !Array.isArray(line.statusByDate)
+    ? line.statusByDate
+    : {};
+  if (values[planningDate] !== undefined && values[planningDate] !== null && values[planningDate] !== "") return values[planningDate];
+  const nearestDate = Object.keys(values)
+    .filter((dateKey) => dateKey <= planningDate && values[dateKey] !== undefined && values[dateKey] !== null && values[dateKey] !== "")
+    .sort()
+    .pop();
+  return nearestDate ? values[nearestDate] : "0%";
 }
 
 function planningCurrentDate(order) {
@@ -3822,15 +3975,19 @@ function planningCurrentDate(order) {
 }
 
 function openPlanning(orderId) {
-  const order = state.orders.find((item) => item.id === orderId);
+  const order = findOrderById(orderId);
   if (!order) return;
+  if (!canOpenOrderDocument(order, "planning")) {
+    alert("Este planeamento não está disponível para este cliente.");
+    return;
+  }
   const readonly = isClient();
   renderDocumentDialogLanguage("planning", readonly, order.reference);
   qs("#planningBody").innerHTML = planningHtml(order, readonly);
-  ["#renumberPlanningButton", "#addPlanningTaskButton", "#addPlanningGroupButton", "#addPlanningFieldButton", "#clearPlanningButton"].forEach((selector) => {
+  ["#savePlanningButton", "#renumberPlanningButton", "#addPlanningTaskButton", "#addPlanningGroupButton", "#addPlanningFieldButton", "#clearPlanningButton"].forEach((selector) => {
     qs(selector).hidden = readonly;
   });
-  qs("#planningDialog").showModal();
+  openAppDialog(qs("#planningDialog"));
 }
 
 function planningHtml(order, readonly) {
@@ -3893,6 +4050,7 @@ function planningHtml(order, readonly) {
 function planningRowHtml(line, index, fields, disabled, readonly) {
   const labels = documentText();
   const extras = fields.map((_, extraIndex) => `<td><input data-planning-row="${index}" data-planning-extra="${extraIndex}" value="${esc(line.extras?.[extraIndex] || "")}" ${disabled}></td>`).join("");
+  const statusNumber = String(line.status || "0%").replace("%", "").trim() || "0";
   return `
     <tr class="${planningStatusClass(line.tipo || line.status)}">
       <td><input data-planning-row="${index}" data-planning-prop="id" value="${esc(line.id)}" ${disabled}></td>
@@ -3900,7 +4058,7 @@ function planningRowHtml(line, index, fields, disabled, readonly) {
       <td><input data-planning-row="${index}" data-planning-prop="duracao" value="${esc(line.duracao)}" placeholder="${esc(labels.duration === "Duration" ? "Ex.: 5 days" : "Ex.: 5 dias")}" ${disabled}></td>
       <td><input data-planning-row="${index}" data-planning-prop="inicio" type="date" value="${esc(line.inicio)}" ${disabled}></td>
       <td><input data-planning-row="${index}" data-planning-prop="conclusao" type="date" value="${esc(line.conclusao)}" ${disabled}></td>
-      <td><input data-planning-row="${index}" data-planning-prop="status" value="${esc(line.status || "0%")}" placeholder="Ex.: 50%" ${disabled}></td>
+      <td><label class="planning-percent-control"><input data-planning-row="${index}" data-planning-prop="status" type="text" inputmode="numeric" pattern="[0-9]*" value="${esc(statusNumber)}" ${disabled}><span>%</span></label></td>
       ${extras}
       ${readonly ? "" : `<td><button class="planning-mini red" data-planning-delete-row="${index}" type="button">X</button></td>`}
     </tr>`;
@@ -3917,7 +4075,7 @@ function planningStatusClass(status) {
 function activePlanning() {
   const page = qs(".planning-page");
   if (!page) return {};
-  const order = state.orders.find((item) => item.id === page.dataset.orderId);
+  const order = findOrderById(page.dataset.orderId);
   return { page, order, data: order ? planningFor(order) : null, readonly: page.dataset.readonly === "true" };
 }
 
@@ -3938,11 +4096,14 @@ function savePlanningField(target) {
   const prop = target.dataset.planningProp;
   if (rowIndex !== undefined && prop) {
     const line = data.linhas[rowIndex];
-    line[prop] = target.value;
     if (prop === "status") {
       const planningDate = planningCurrentDate({ planning: data });
       if (!line.statusByDate || typeof line.statusByDate !== "object" || Array.isArray(line.statusByDate)) line.statusByDate = {};
-      line.statusByDate[planningDate] = target.value;
+      const cleanPercent = normalizePlanningPercent(target.value);
+      line[prop] = cleanPercent;
+      line.statusByDate[planningDate] = cleanPercent;
+    } else {
+      line[prop] = target.value;
     }
   }
   const extraIndex = target.dataset.planningExtra;
@@ -3957,6 +4118,19 @@ function refreshPlanning() {
   qs("#planningBody").innerHTML = planningHtml(order, readonly);
   persistStateOnly();
   scheduleOrderClientNotification(order);
+}
+
+function savePlanningNow() {
+  const { order, data, readonly } = activePlanning();
+  if (!order || !data || readonly) return;
+  persistStateOnly();
+  scheduleOrderClientNotification(order);
+  alert("Planeamento guardado.");
+}
+
+function normalizePlanningPercent(valueText) {
+  const valueNumber = Math.max(0, Math.min(Number(String(valueText || "0").replace("%", "")) || 0, 100));
+  return `${valueNumber}%`;
 }
 
 function addPlanningLine(type = "tarefa") {
@@ -4080,6 +4254,10 @@ function esc(valueText) {
   return String(valueText ?? "").replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;").replaceAll("'", "&#039;");
 }
 
+function jsArg(valueText) {
+  return JSON.stringify(String(valueText ?? "")).replaceAll("<", "\\u003C").replaceAll(">", "\\u003E").replaceAll("&", "\\u0026").replaceAll("'", "\\u0027");
+}
+
 qsa(".nav-item").forEach((button) => button.addEventListener("click", () => {
   setView(button.dataset.view);
   if (button.dataset.scrollTarget) {
@@ -4108,6 +4286,10 @@ qs("#openVacationMapButton")?.addEventListener("click", openVacationMapPrintable
 qs("#closeVacationMapButton")?.addEventListener("click", () => qs("#vacationMapDialog")?.close());
 qs("#vacationMapSearch")?.addEventListener("input", renderVacationMap);
 qs("#vacationMapTeamFilter")?.addEventListener("change", renderVacationMap);
+qs("#vacationMapYearSelect")?.addEventListener("change", (event) => {
+  vacationMapYear = Number(event.target.value || new Date().getFullYear());
+  renderVacationMap();
+});
 qs("#printVacationMapButton")?.addEventListener("click", printVacationMap);
 qs("#exportVacationMapPdfButton")?.addEventListener("click", exportVacationMapPdf);
 qs("#exportVacationMapExcelButton")?.addEventListener("click", exportVacationMapExcel);
@@ -4132,14 +4314,18 @@ qs("#notificationButton").addEventListener("click", () => {
 qs("#markNotificationsReadButton").addEventListener("click", markNotificationsRead);
 qs("#exportButton").addEventListener("click", exportCurrentViewPdf);
 ["client", "company", "order", "user", "vacation", "absence"].forEach((name) => qs(`#${name}Search`)?.addEventListener("input", render));
+qs("#ordersTable")?.addEventListener("click", handleOrderDocumentButtonClick);
+qs("#clientOrdersTable")?.addEventListener("click", handleOrderDocumentButtonClick);
 
 document.addEventListener("click", (event) => {
-  const target = event.target;
+  const target = event.target instanceof Element ? event.target : event.target?.parentElement;
+  if (!target) return;
   if (!target.closest(".notification-wrap")) qs("#notificationPanel").hidden = true;
   if (target.closest("[data-notification-open]")) {
     openNotification(target.closest("[data-notification-open]").dataset.notificationOpen);
     return;
   }
+  if (handleOrderDocumentButtonClick(event)) return;
   if (target.closest("[data-vacation-map-cell]")) {
     editVacationMapCell(target.closest("[data-vacation-map-cell]"));
     return;
@@ -4173,8 +4359,6 @@ document.addEventListener("click", (event) => {
     fn(mode, target.closest(`[data-${key}]`).dataset[toDatasetKey(key)]);
   }
   if (target.closest("[data-new-client-order]")) openDialog("order", null, { clientId: target.closest("[data-new-client-order]").dataset.newClientOrder });
-  if (target.closest("[data-schedule-order]")) openSchedule(target.closest("[data-schedule-order]").dataset.scheduleOrder);
-  if (target.closest("[data-planning-order]")) openPlanning(target.closest("[data-planning-order]").dataset.planningOrder);
   if (target.closest("[data-planning-delete-row]")) {
     const { data, readonly } = activePlanning();
     if (data && !readonly && confirm("Eliminar esta tarefa?")) {
@@ -4243,6 +4427,7 @@ qs("#closeScheduleButton").addEventListener("click", () => qs("#scheduleDialog")
 qs("#printScheduleButton").addEventListener("click", () => printDocument("schedule"));
 qs("#exportScheduleButton").addEventListener("click", exportSchedule);
 qs("#closePlanningButton").addEventListener("click", () => qs("#planningDialog").close());
+qs("#savePlanningButton")?.addEventListener("click", savePlanningNow);
 qs("#printPlanningButton").addEventListener("click", () => printDocument("planning"));
 qs("#exportPlanningButton").addEventListener("click", exportPlanning);
 qs("#renumberPlanningButton").addEventListener("click", renumberPlanning);
@@ -4393,7 +4578,7 @@ function buildPdfContentStream(lines, fontSize, lineHeight, marginLeft, startY) 
 function exportSchedule() {
   const page = qs(".schedule-page");
   if (!page) return;
-  const order = state.orders.find((item) => item.id === page.dataset.orderId);
+  const order = findOrderById(page.dataset.orderId);
   if (!order) return;
   downloadTextPdf(`cronograma-${order.reference || "molde"}.pdf`, buildSchedulePdfDocument(order));
 }
@@ -4815,7 +5000,7 @@ function exportSchedule() {
   }
   const page = qs(".schedule-page");
   if (!page) return;
-  const order = state.orders.find((item) => item.id === page.dataset.orderId);
+  const order = findOrderById(page.dataset.orderId);
   if (!order) return;
 
   const doc = new jsPDF({ orientation: "landscape", unit: "mm", format: "a4" });
@@ -4835,7 +5020,7 @@ function exportSchedule() {
   ], margin, 24);
 
   const body = scheduleOperations.map((op, rowIndex) => {
-    const row = [`${rowIndex + 1}. ${english ? op[1] || "" : op[0] || ""}`, english ? "" : op[1] || "", data[`r${rowIndex}_resp`] || op[2] || ""];
+    const row = [`${rowIndex + 1}. ${op[0] || ""}`, op[1] || "", data[`r${rowIndex}_resp`] || op[2] || ""];
     for (let week = 1; week <= 16; week += 1) {
       const weekValue = data[`r${rowIndex}_w${week}`];
       const legacyValue = data[`r${rowIndex}_w${week}_programado`] || data[`r${rowIndex}_w${week}_realizado`] ? "X" : "";
