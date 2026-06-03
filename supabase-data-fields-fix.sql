@@ -59,6 +59,36 @@ alter table public.orders
   add column if not exists planning jsonb,
   add column if not exists mold_photos jsonb not null default '[]'::jsonb;
 
+alter table public.orders
+  alter column status set default 'Nota de encomenda recebida';
+
+update public.orders
+set status = case status
+  when 'Aberta' then 'Nota de encomenda recebida'
+  when 'Recebido' then 'Nota de encomenda recebida'
+  when 'Em producao' then 'Em produção'
+  when 'Em analise' then 'Em análise'
+  when 'Em desenho preliminar (3D) - aprovação de aços pendente' then 'Em desenho preliminar (3D) – aprovação de aços pendente'
+  when 'Em desenho pre-final (3D) - aprovacao de maquinacoes pendente' then 'Em desenho pré-final (3D) – aprovação de maquinações pendente'
+  when 'Em desenho pré-final (3D) - aprovação de maquinações pendente' then 'Em desenho pré-final (3D) – aprovação de maquinações pendente'
+  when '1º Ensaio Realizado' then '1.º ensaio realizado'
+  when '1º ensaio realizado' then '1.º ensaio realizado'
+  when 'Concluido' then 'Concluído'
+  else status
+end
+where status in (
+  'Aberta',
+  'Recebido',
+  'Em producao',
+  'Em analise',
+  'Em desenho preliminar (3D) - aprovação de aços pendente',
+  'Em desenho pre-final (3D) - aprovacao de maquinacoes pendente',
+  'Em desenho pré-final (3D) - aprovação de maquinações pendente',
+  '1º Ensaio Realizado',
+  '1º ensaio realizado',
+  'Concluido'
+);
+
 alter table public.vacations
   add column if not exists notes text not null default '',
   add column if not exists decided_by text not null default '',

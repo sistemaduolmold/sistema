@@ -62,7 +62,7 @@ create table if not exists public.orders (
   reference text not null default '',
   title text not null,
   description text not null default '',
-  status text not null default 'Aberta',
+  status text not null default 'Nota de encomenda recebida',
   priority text not null default 'Media',
   progress integer not null default 0,
   due_date date,

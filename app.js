@@ -3,7 +3,6 @@
 const maxVacationRequestDays = 11;
 const employeeVacationRequestDays = 11;
 const adminVacationDays = 30;
-const firstYearVacationDays = 6;
 
 const demoData = {
   activeAccount: "user:user-admin",
@@ -154,6 +153,21 @@ const vacationLegendItems = [
   { id: "bank-hours", code: "BG", label: "Banco de horas", className: "code-bg", color: "#92cddc" },
   { id: "compensatory", code: "DC", label: "Descanso compensatório", className: "code-dc", color: "#e36d09" }
 ];
+const orderStatusOptions = [
+  "Nota de encomenda recebida",
+  "Em análise",
+  "Em desenho preliminar (3D) – aprovação de aços pendente",
+  "Aços aprovados",
+  "Em desenho pré-final (3D) – aprovação de maquinações pendente",
+  "Maquinações aprovadas",
+  "Aguardando 3D peça final do cliente",
+  "Aguardando nota de encomenda do cliente",
+  "Aguardando outros dados técnicos do cliente",
+  "Em produção",
+  "1.º ensaio realizado",
+  "Concluído",
+  "Entregue"
+];
 
 let state = loadState();
 let currentView = "adminPage";
@@ -255,7 +269,7 @@ const forms = {
     ["clientId", "Cliente", "client", true],
     ["reference", "Referência/OS", "text", true],
     ["title", "Titulo", "text", true],
-    ["status", "Estado", "select:Recebido|Em análise|Em produção|1º Ensaio Realizado|Aguardando 3D peça final do cliente|Aguardando nota de encomenda do cliente|Aguardando outros dados técnicos do cliente|Concluído|Entregue"],
+    ["status", "Estado", `select:${orderStatusOptions.join("|")}`],
     ["progress", "Progresso (%)", "number", true],
     ["dueDate", "Previsão de entrega", "date"],
     ["description", "Descrição", "textarea"],
@@ -396,8 +410,14 @@ function cleanAbsenceRecords(absences, users = []) {
 
 function normalizeOrderText(order) {
   const statusMap = {
+    Recebido: "Nota de encomenda recebida",
     "Em producao": "Em produção",
     "Em analise": "Em análise",
+    "Em desenho preliminar (3D) - aprovação de aços pendente": "Em desenho preliminar (3D) – aprovação de aços pendente",
+    "Em desenho pre-final (3D) - aprovacao de maquinacoes pendente": "Em desenho pré-final (3D) – aprovação de maquinações pendente",
+    "Em desenho pré-final (3D) - aprovação de maquinações pendente": "Em desenho pré-final (3D) – aprovação de maquinações pendente",
+    "1º Ensaio Realizado": "1.º ensaio realizado",
+    "1º ensaio realizado": "1.º ensaio realizado",
     Concluido: "Concluído",
     "Aguardando cliente": "Aguardando outros dados técnicos do cliente"
   };
@@ -963,7 +983,7 @@ function mapOrderFromSupabase(row) {
     reference: row.reference || "",
     title: row.title || "",
     description: row.description || "",
-    status: row.status || "Recebido",
+    status: row.status || "Nota de encomenda recebida",
     progress: String(row.progress ?? 0),
     dueDate: row.due_date || "",
     weeklyUpdate: row.weekly_update || "",
@@ -1086,7 +1106,7 @@ function orderToSupabase(order) {
     reference: order.reference || "",
     title: order.title || "",
     description: order.description || "",
-    status: order.status || "Recebido",
+    status: order.status || "Nota de encomenda recebida",
     progress: Number(order.progress || 0),
     due_date: order.dueDate || null,
     weekly_update: order.weeklyUpdate || "",
@@ -1166,7 +1186,7 @@ function renderDashboard() {
 }
 
 function renderRolePages() {
-  const openOrders = state.orders.filter((order) => !["Concluido", "Entregue"].includes(order.status));
+  const openOrders = state.orders.filter((order) => !["Concluido", "Concluído", "Entregue"].includes(order.status));
   text("#adminOpenOrders", openOrders.length);
   text("#adminClientLogins", state.clients.filter((client) => client.email && client.password).length);
   text("#adminPendingVacations", state.vacations.filter((item) => item.status === "Pendente").length);
@@ -1394,13 +1414,19 @@ function clientDocumentButtons(order) {
 function clientPortalStatus(status) {
   if (currentClient()?.portalLanguage !== "Inglês") return status;
   return {
-    Recebido: "Received",
+    Recebido: "Order received",
+    "Nota de encomenda recebida": "Order received",
     "Em análise": "Under review",
+    "Em desenho preliminar (3D) – aprovação de aços pendente": "Preliminary mold 3D design – pending steel approval",
+    "Aços aprovados": "Steel purchase approval completed",
+    "Em desenho pré-final (3D) – aprovação de maquinações pendente": "Pre-final mold 3D design - Pending machining approval",
+    "Maquinações aprovadas": "Machining approval completed",
+    "Aguardando 3D peça final do cliente": "Awaiting customer's final 3D part",
+    "Aguardando nota de encomenda do cliente": "Awaiting purchase order",
+    "Aguardando outros dados técnicos do cliente": "Awaiting additional technical data from customer",
     "Em produção": "In production",
-    "1º Ensaio Realizado": "1st trial completed",
-    "Aguardando 3D peça final do cliente": "Waiting for final client 3D part",
-    "Aguardando nota de encomenda do cliente": "Waiting for client purchase order",
-    "Aguardando outros dados técnicos do cliente": "Waiting for other client technical data",
+    "1º Ensaio Realizado": "FOT completed",
+    "1.º ensaio realizado": "FOT completed",
     "Concluído": "Completed",
     Entregue: "Delivered",
     Ativo: "Active",
@@ -1463,13 +1489,16 @@ function renderUsers() {
     const requestAllowance = vacationAllowance(user.id, new Date().getFullYear(), "Funcionario");
     const total = vacationTotalMarkedDays(user.id);
     const extraDays = vacationRequestExtraDays(user.id);
+    const extraControl = role() !== "Funcionario"
+      ? `<label class="vacation-extra-control">Dias extra autorizados<select data-vacation-extra-days="${user.id}" aria-label="Dias adicionais autorizados para ${esc(user.name)}">${[0, 1, 2, 3].map((value) => `<option value="${value}" ${extraDays === value ? "selected" : ""}>+${value} dias</option>`).join("")}</select></label><small>Limite que este colaborador pode pedir: ${requestAllowance} dias</small>`
+      : `<small>Limite que pode pedir: ${requestAllowance} dias</small>`;
     return `<tr>
       <td><strong>${esc(user.name)}</strong><small>${esc(user.position || "Sem cargo")}</small></td>
       <td><strong>${esc(user.employeeNumber || "Sem matrícula")}</strong></td>
       <td><span class="status ${cls(user.role)}">${esc(user.role)}</span></td>
       <td><strong>${esc(user.email)}</strong><small>${esc(user.phone || "Sem telefone")}</small></td>
       <td>${esc(user.department || "Sem departamento")}</td>
-      <td><strong>${total}/${allowance} dias</strong><small>Total marcado por Admin/RH</small>${role() !== "Funcionario" ? `<label class="vacation-extra-control">Pedido pessoal: ${requestAllowance} dias<select data-vacation-extra-days="${user.id}" aria-label="Dias adicionais autorizados para ${esc(user.name)}">${[0, 1, 2, 3].map((value) => `<option value="${value}" ${extraDays === value ? "selected" : ""}>+${value} dias</option>`).join("")}</select></label>` : `<small>Pedido pessoal: ${requestAllowance} dias</small>`}</td>
+      <td><strong>${total}/${allowance} dias</strong><small>Total marcado por Admin/RH</small>${extraControl}</td>
       <td><div class="row-actions">${canManageUsers() ? `<button class="row-action" data-edit-user="${user.id}">Editar</button><button class="row-action delete" data-delete-user="${user.id}">Apagar</button>` : ""}</div></td>
     </tr>`;
   });
@@ -1779,6 +1808,15 @@ function saveVacationMapCellSelection(legendId = "") {
   const previousOverrides = state.vacationMapOverrides;
   state.vacationMapOverrides = state.vacationMapOverrides.filter((item) => !(item.userId === userId && item.date === iso));
   if (legendItem) {
+    const code = String(legendItem.code || "").toUpperCase();
+    if (["F", "M"].includes(code)) {
+      const admissionValidation = validateVacationAdmission(userId, iso);
+      if (!admissionValidation.ok) {
+        state.vacationMapOverrides = previousOverrides;
+        alert(admissionValidation.message);
+        return;
+      }
+    }
     state.vacationMapOverrides.push({
       userId,
       date: iso,
@@ -1949,7 +1987,7 @@ function dialogSubtitle(mode) {
   if (mode === "profileUser" || mode === "profileClient") return "Atualize as informações do perfil atual.";
   if (mode === "client") return "Preencha os dados do cliente e da empresa na mesma ficha.";
   if (mode === "vacation") return role() === "Funcionario"
-    ? `Escolha as datas. O sistema calcula os dias úteis e limita cada pedido a ${maxVacationRequestDays} dias.`
+    ? `Escolha as datas. O sistema calcula os dias úteis. O limite começa nos ${maxVacationRequestDays} dias e aumenta apenas se Admin/RH autorizar dias extra para o seu perfil.`
     : `Escolha as datas. Marcações manuais de Admin/RH respeitam o limite anual de ${adminVacationDays} dias por colaborador.`;
   if (mode === "absence") return "Registe a falta e indique se ela deve ser compensada com 1 dia de férias.";
   return "Preencha os dados principais.";
@@ -2434,7 +2472,9 @@ function setupDialogRules(mode) {
   const origin = form.elements.origin;
   days.readOnly = true;
   days.required = false;
-  days.parentElement.insertAdjacentHTML("beforeend", `<small class="field-hint" id="vacationDayHint"></small>`);
+  if (!qs("#vacationDayHint")) {
+    days.parentElement.insertAdjacentHTML("afterend", `<div class="field-hint vacation-day-hint full" id="vacationDayHint"></div>`);
+  }
   const update = () => updateVacationCalculation();
   [start, end, user, origin].forEach((field) => field?.addEventListener("change", update));
   update();
@@ -2457,7 +2497,22 @@ function updateVacationCalculation() {
     origin: form.elements.origin?.value,
     userId: form.elements.userId?.value
   });
-  const periodLimit = manualEntry ? adminVacationDays : maxVacationRequestDays;
+  const vacationYear = Number(String(start.value || today()).slice(0, 4));
+  const origin = form.elements.origin?.value || (role() === "Funcionario" ? "Funcionario" : "Admin/RH");
+  const periodLimit = manualEntry ? adminVacationDays : vacationAllowance(form.elements.userId.value, vacationYear, "Funcionario");
+  const admissionValidation = validateVacationAdmission(form.elements.userId.value, start.value);
+  if (!admissionValidation.ok) {
+    end.value = "";
+    end.min = "";
+    end.max = "";
+    days.value = "";
+    if (hint) {
+      hint.classList.add("warning");
+      hint.textContent = admissionValidation.message;
+    }
+    return;
+  }
+  if (hint) hint.classList.remove("warning");
   end.max = addDays(start.value, periodLimit - 1);
   if (!end.value || end.value < start.value) end.value = start.value;
   if (end.value > end.max) end.value = end.max;
@@ -2467,8 +2522,6 @@ function updateVacationCalculation() {
     total = businessDays(start.value, end.value);
   }
   days.value = total || "";
-  const vacationYear = Number(String(start.value || today()).slice(0, 4));
-  const origin = form.elements.origin?.value || (role() === "Funcionario" ? "Funcionario" : "Admin/RH");
   const allowance = vacationAllowance(form.elements.userId.value, vacationYear, origin);
   const used = vacationDaysUsedForAllowance(form.elements.userId.value, editingId, vacationYear, origin);
   const remaining = Math.max(allowance - used - total, 0);
@@ -2478,13 +2531,15 @@ function updateVacationCalculation() {
 function validateVacation(data) {
   const days = businessDays(data.startDate, data.endDate);
   const manualEntry = vacationIsManualEntry(data);
-  const periodLimit = manualEntry ? adminVacationDays : maxVacationRequestDays;
+  const vacationYear = Number(String(data.startDate || today()).slice(0, 4));
+  const periodLimit = manualEntry ? adminVacationDays : vacationAllowance(data.userId, vacationYear, "Funcionario");
   if (!data.startDate || !data.endDate) return { ok: false, message: "Preencha a data inicial e a data final." };
   if (new Date(data.endDate) < new Date(data.startDate)) return { ok: false, message: "A data final não pode ser anterior à data inicial." };
   if (data.endDate > addDays(data.startDate, periodLimit - 1)) return { ok: false, message: `A data final pode ir apenas até ${periodLimit} dias corridos a partir da data inicial.` };
   if (days < 1) return { ok: false, message: "O período precisa ter pelo menos 1 dia útil." };
   if (days > periodLimit) return { ok: false, message: `Este registo de férias pode ter no máximo ${periodLimit} dias úteis a partir da data inicial.` };
-  const vacationYear = Number(String(data.startDate || today()).slice(0, 4));
+  const admissionValidation = validateVacationAdmission(data.userId, data.startDate);
+  if (!admissionValidation.ok) return admissionValidation;
   const allowance = vacationAllowance(data.userId, vacationYear, data.origin);
   const used = vacationDaysUsedForAllowance(data.userId, editingId, vacationYear, data.origin);
   if (used + days > allowance) return { ok: false, message: `Este colaborador já tem ${used} dias usados/pendentes. O limite anual é ${allowance} dias.` };
@@ -2512,10 +2567,22 @@ function vacationIsManualEntry(data = {}) {
 
 function vacationAllowance(userId, year = new Date().getFullYear(), origin = "Admin/RH") {
   if (String(origin || "") !== "Funcionario") return adminVacationDays;
+  return Math.min(employeeVacationRequestDays + vacationRequestExtraDays(userId), adminVacationDays);
+}
+
+function validateVacationAdmission(userId, startDate) {
   const user = state.users.find((item) => item.id === userId);
-  const admissionYear = Number(String(user?.admissionDate || "").slice(0, 4));
-  const baseDays = admissionYear && admissionYear === Number(year) ? firstYearVacationDays : employeeVacationRequestDays;
-  return baseDays + vacationRequestExtraDays(userId);
+  if (!user?.admissionDate || !startDate) return { ok: true };
+  const admissionYear = Number(String(user.admissionDate).slice(0, 4));
+  const vacationYear = Number(String(startDate).slice(0, 4));
+  const sixMonthsDate = addMonths(user.admissionDate, 6);
+  if (startDate < sixMonthsDate) {
+    return { ok: false, message: `Este colaborador só pode pedir/gozar férias a partir de ${date(sixMonthsDate)}, após 6 meses de contrato.` };
+  }
+  if (admissionYear && vacationYear === admissionYear) {
+    return { ok: false, message: "No ano de admissão, as férias vencidas não podem ser gozadas no próprio ano civil. Devem ser gozadas a partir do ano seguinte." };
+  }
+  return { ok: true };
 }
 
 function vacationDaysUsedForAllowance(userId, ignoreId = null, year = new Date().getFullYear(), origin = "Admin/RH") {
@@ -2580,6 +2647,16 @@ function addDays(valueText, amount) {
   return `${dateValue.getFullYear()}-${month}-${day}`;
 }
 
+function addMonths(valueText, amount) {
+  const dateValue = new Date(`${valueText}T00:00:00`);
+  const originalDay = dateValue.getDate();
+  dateValue.setMonth(dateValue.getMonth() + amount);
+  if (dateValue.getDate() < originalDay) dateValue.setDate(0);
+  const month = String(dateValue.getMonth() + 1).padStart(2, "0");
+  const day = String(dateValue.getDate()).padStart(2, "0");
+  return `${dateValue.getFullYear()}-${month}-${day}`;
+}
+
 function saveAbsenceWithCompensation(data) {
   const target = state.absences;
   const id = editingId || `absence-${Date.now()}`;
@@ -2617,7 +2694,7 @@ function collection(mode) {
 }
 
 function defaultRecord(mode) {
-  if (mode === "order") return { clientId: state.clients[0]?.id, status: "Recebido", progress: "0", showPlanningToClient: "Sim", showScheduleToClient: "Sim", history: [] };
+  if (mode === "order") return { clientId: state.clients[0]?.id, status: "Nota de encomenda recebida", progress: "0", showPlanningToClient: "Sim", showScheduleToClient: "Sim", history: [] };
   if (mode === "vacation") return { userId: currentUser()?.id || "user-funcionario", origin: role() === "Funcionario" ? "Funcionario" : "Admin/RH", status: role() === "Funcionario" ? "Pendente" : "Aprovado" };
   if (mode === "absence") return { userId: currentUser()?.id || "user-funcionario", type: "Justificada", compensateVacation: "Não", status: "Pendente" };
   if (mode === "user") return { employeeNumber: `COL-${String(state.users.length + 1).padStart(3, "0")}`, admissionDate: "", role: "Funcionario", status: "Ativo" };
