@@ -678,12 +678,18 @@ function render() {
 function renderAccountSelector() {
   const accountSwitcher = qs(".account-switcher");
   if (accountSwitcher) accountSwitcher.hidden = !adminSessionAccount;
-  const options = [
-    ...state.users.map((user) => ({ value: `user:${user.id}`, label: `${user.name} - ${user.role}` })),
-    ...state.clients.map((client) => ({ value: `client:${client.id}`, label: `${client.name} - Cliente` }))
-  ];
+  const userOptions = adminSessionAccount
+    ? state.users
+      .filter((user) => ["Admin", "RH"].includes(user.role))
+      .map((user) => ({ value: `user:${user.id}`, label: `${user.name} - ${user.role}` }))
+    : state.users.map((user) => ({ value: `user:${user.id}`, label: `${user.name} - ${user.role}` }));
+  const options = [...userOptions];
   if (adminSessionAccount && !options.some((option) => option.value === adminSessionAccount)) {
     options.unshift({ value: adminSessionAccount, label: "Administrador - Admin" });
+  }
+  if (adminSessionAccount && !options.some((option) => option.value === state.activeAccount)) {
+    state.activeAccount = adminSessionAccount;
+    persistStateOnly();
   }
   qs("#demoAccountSelect").innerHTML = options.map((option) => `<option value="${option.value}" ${state.activeAccount === option.value ? "selected" : ""}>${esc(option.label)}</option>`).join("");
   qs("#currentSessionName").textContent = isClient() ? `${currentClient()?.name || "Cliente"} - Cliente` : `${currentUser()?.name || "Utilizador"} - ${role()}`;
@@ -1236,8 +1242,9 @@ function renderOrders() {
       <td><span class="status ${cls(order.status)}">${esc(order.status)}</span></td>
       <td><strong>${esc(order.progress)}%</strong><small>Previsão: ${date(order.dueDate)}</small></td>
       <td>${esc(order.weeklyUpdate || "Sem atualização")}</td>
-      <td><div class="row-actions"><button class="row-action" data-edit-order="${esc(order.id)}" type="button">Editar</button><button class="row-action" data-planning-order="${esc(order.id)}" onclick='event.stopPropagation(); openPlanning(${jsArg(order.id)}); return false;' type="button">Planeamento</button><button class="row-action" data-schedule-order="${esc(order.id)}" onclick='event.stopPropagation(); openSchedule(${jsArg(order.id)}); return false;' type="button">Cronograma</button><button class="row-action delete" data-delete-order="${esc(order.id)}" type="button">Apagar</button></div></td>
+      <td><div class="row-actions"><button class="row-action" data-edit-order="${esc(order.id)}" type="button">Editar</button><button class="row-action" data-planning-order="${esc(order.id)}" type="button">Planeamento</button><button class="row-action" data-schedule-order="${esc(order.id)}" type="button">Cronograma</button><button class="row-action delete" data-delete-order="${esc(order.id)}" type="button">Apagar</button></div></td>
     </tr>`);
+  wireOrderDocumentButtons(qs("#ordersTable"));
 }
 
 function renderClientPortal() {
@@ -1253,6 +1260,7 @@ function renderClientPortal() {
       <td>${esc(order.weeklyUpdate || portalText.noWeeklyUpdate)}</td>
       <td><div class="row-actions">${clientDocumentButtons(order)}</div></td>
     </tr>`);
+  wireOrderDocumentButtons(qs("#clientOrdersTable"));
 }
 
 function renderProfile() {
@@ -1390,14 +1398,14 @@ function clientDocumentButtons(order) {
   const portalText = clientPortalText();
   const preference = order.clientDocumentAccess || orderClientDocumentAccess(order);
   const buttons = [];
-  if (["Planeamento", "Ambos"].includes(preference) && (order.showPlanningToClient || "Sim") === "Sim") buttons.push(`<button class="row-action" data-planning-order="${esc(order.id)}" onclick='event.stopPropagation(); openPlanning(${jsArg(order.id)}); return false;' type="button">${esc(portalText.planning)}</button>`);
-  if (["Cronograma", "Ambos"].includes(preference) && (order.showScheduleToClient || "Sim") === "Sim") buttons.push(`<button class="row-action" data-schedule-order="${esc(order.id)}" onclick='event.stopPropagation(); openSchedule(${jsArg(order.id)}); return false;' type="button">${esc(portalText.schedule)}</button>`);
+  if (["Planeamento", "Ambos"].includes(preference) && isDocumentEnabled(order.showPlanningToClient)) buttons.push(`<button class="row-action" data-planning-order="${esc(order.id)}" type="button">${esc(portalText.planning)}</button>`);
+  if (["Cronograma", "Ambos"].includes(preference) && isDocumentEnabled(order.showScheduleToClient)) buttons.push(`<button class="row-action" data-schedule-order="${esc(order.id)}" type="button">${esc(portalText.schedule)}</button>`);
   return buttons.length ? buttons.join("") : `<span class="muted-cell">${esc(portalText.noDocuments)}</span>`;
 }
 
 function orderClientDocumentAccess(order = {}) {
-  const planning = (order.showPlanningToClient || "Sim") === "Sim";
-  const schedule = (order.showScheduleToClient || "Sim") === "Sim";
+  const planning = isDocumentEnabled(order.showPlanningToClient);
+  const schedule = isDocumentEnabled(order.showScheduleToClient);
   if (planning && schedule) return "Ambos";
   if (planning) return "Planeamento";
   if (schedule) return "Cronograma";
@@ -1416,17 +1424,47 @@ function canOpenOrderDocument(order, documentType) {
   if (!order) return false;
   if (!isClient()) return true;
   const client = currentClient();
-  if (!client || order.clientId !== client.id) return false;
+  if (!client || String(order.clientId ?? "") !== String(client.id ?? "")) return false;
   const access = order.clientDocumentAccess || orderClientDocumentAccess(order);
-  if (documentType === "planning") return ["Planeamento", "Ambos"].includes(access) && (order.showPlanningToClient || "Sim") === "Sim";
-  if (documentType === "schedule") return ["Cronograma", "Ambos"].includes(access) && (order.showScheduleToClient || "Sim") === "Sim";
+  if (documentType === "planning") return ["Planeamento", "Ambos"].includes(access) && isDocumentEnabled(order.showPlanningToClient);
+  if (documentType === "schedule") return ["Cronograma", "Ambos"].includes(access) && isDocumentEnabled(order.showScheduleToClient);
   return false;
+}
+
+function hasStoredOrderDocument(order, documentType) {
+  if (!order) return false;
+  if (documentType === "schedule") {
+    return !!order.schedule && typeof order.schedule === "object" && !Array.isArray(order.schedule);
+  }
+  if (documentType === "planning") {
+    return !!order.planning && typeof order.planning === "object" && !Array.isArray(order.planning);
+  }
+  return false;
+}
+
+function missingOrderDocumentMessage(documentType) {
+  const englishPortal = isClient() && currentClient()?.portalLanguage === "Inglês";
+  if (englishPortal) {
+    return documentType === "planning"
+      ? "This planning document is not available for this order."
+      : "This schedule document is not available for this order.";
+  }
+  return documentType === "planning"
+    ? "Este planeamento ainda não existe para esta encomenda."
+    : "Este cronograma ainda não existe para esta encomenda.";
 }
 
 function findOrderById(orderId) {
   const normalizedId = String(orderId ?? "");
   if (!normalizedId) return null;
   return state.orders.find((item) => String(item.id ?? "") === normalizedId) || null;
+}
+
+function isDocumentEnabled(value) {
+  if (value === true) return true;
+  if (value === false || value === null || value === undefined) return false;
+  const normalized = String(value).trim().toLowerCase();
+  return ["sim", "true", "1", "yes", "y"].includes(normalized);
 }
 
 function closestEventElement(event, selector) {
@@ -1452,15 +1490,54 @@ function handleOrderDocumentButtonClick(event) {
   return false;
 }
 
+function wireOrderDocumentButtons(scope) {
+  if (!scope) return;
+  qsa("[data-planning-order]", scope).forEach((button) => {
+    button.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      openPlanning(button.dataset.planningOrder);
+    });
+  });
+  qsa("[data-schedule-order]", scope).forEach((button) => {
+    button.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      openSchedule(button.dataset.scheduleOrder);
+    });
+  });
+}
+
 function openAppDialog(dialog) {
   if (!dialog) return;
-  if (dialog.open) return;
+  if (dialog.id === "scheduleDialog" || dialog.id === "planningDialog") {
+    dialog.style.position = "fixed";
+    dialog.style.inset = "12px";
+    dialog.style.margin = "0";
+    dialog.style.zIndex = "10000";
+    dialog.style.maxHeight = "calc(100vh - 24px)";
+  }
+  if (dialog.open && typeof dialog.close === "function") {
+    try {
+      dialog.close();
+    } catch (error) {
+      console.warn("Nao foi possivel reiniciar o dialog antes de abrir.", error);
+    }
+  }
   if (typeof dialog.showModal === "function") {
     try {
       dialog.showModal();
       return;
     } catch (error) {
       console.warn("Abertura do dialog por showModal falhou; a usar fallback.", error);
+    }
+  }
+  if (typeof dialog.show === "function") {
+    try {
+      dialog.show();
+      return;
+    } catch (error) {
+      console.warn("Abertura do dialog por show falhou; a usar fallback.", error);
     }
   }
   dialog.setAttribute("open", "");
@@ -1491,6 +1568,7 @@ function clientPortalStatus(status) {
 }
 
 function documentText() {
+  const english = isClient() && currentClient()?.portalLanguage === "Inglês";
   return english ? {
     schedule: "Schedule", planning: "Planning", clientView: "Client view", adminEdit: "Admin editing",
     save: "Save", print: "Print", downloadPdf: "Download PDF", renumberIds: "Renumber IDs", newTask: "New task", newGroup: "New group", newField: "New field", clear: "Clear",
@@ -3717,16 +3795,38 @@ function buildVacationMapPdfLines(records) {
 }
 
 function openSchedule(orderId) {
+  openOrderDocument(orderId, "schedule");
+}
+
+function openPlanning(orderId) {
+  openOrderDocument(orderId, "planning");
+}
+
+function openOrderDocument(orderId, documentType) {
   const order = findOrderById(orderId);
   if (!order) return;
-  if (!canOpenOrderDocument(order, "schedule")) {
-    alert("Este cronograma não está disponível para este cliente.");
+  if (!canOpenOrderDocument(order, documentType)) {
+    alert(documentType === "planning"
+      ? "Este planeamento não está disponível para este cliente."
+      : "Este cronograma não está disponível para este cliente.");
+    return;
+  }
+  if (!hasStoredOrderDocument(order, documentType)) {
+    alert(missingOrderDocumentMessage(documentType));
     return;
   }
   const readonly = isClient();
-  renderDocumentDialogLanguage("schedule", readonly, order.reference);
-  qs("#scheduleBody").innerHTML = scheduleHtml(order, readonly);
-  openAppDialog(qs("#scheduleDialog"));
+  const planning = documentType === "planning";
+  renderDocumentDialogLanguage(documentType, readonly, order.reference);
+  if (planning) {
+    qs("#planningBody").innerHTML = planningHtml(order, readonly);
+    ["#savePlanningButton", "#renumberPlanningButton", "#addPlanningTaskButton", "#addPlanningGroupButton", "#addPlanningFieldButton", "#clearPlanningButton"].forEach((selector) => {
+      qs(selector).hidden = readonly;
+    });
+  } else {
+    qs("#scheduleBody").innerHTML = scheduleHtml(order, readonly);
+  }
+  openAppDialog(qs(planning ? "#planningDialog" : "#scheduleDialog"));
 }
 
 function scheduleHtml(order, readonly) {
@@ -3972,22 +4072,6 @@ function planningStatusForDate(line, planningDate) {
 
 function planningCurrentDate(order) {
   return order?.planning?.data || today();
-}
-
-function openPlanning(orderId) {
-  const order = findOrderById(orderId);
-  if (!order) return;
-  if (!canOpenOrderDocument(order, "planning")) {
-    alert("Este planeamento não está disponível para este cliente.");
-    return;
-  }
-  const readonly = isClient();
-  renderDocumentDialogLanguage("planning", readonly, order.reference);
-  qs("#planningBody").innerHTML = planningHtml(order, readonly);
-  ["#savePlanningButton", "#renumberPlanningButton", "#addPlanningTaskButton", "#addPlanningGroupButton", "#addPlanningFieldButton", "#clearPlanningButton"].forEach((selector) => {
-    qs(selector).hidden = readonly;
-  });
-  openAppDialog(qs("#planningDialog"));
 }
 
 function planningHtml(order, readonly) {
