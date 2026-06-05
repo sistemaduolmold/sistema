@@ -30,25 +30,25 @@ const demoData = {
 const scheduleOperations = [
   ["Mapa de Inputs/Outputs", "Input / Output Map", ""],
   ["Preliminar do Molde", "Mold Preliminary Drawing", "DM"],
-  ["AMFE/1a Revisao Projecto", "FMEA/Project Revision", "/DM"],
+  ["AMFE/1ª Revisão Projecto", "FMEA/Project Revision", "/DM"],
   ["Projecto 3D Molde", "3D Molde Project", "DM"],
-  ["Aprovacao do Projecto", "Project aproval", "DM"],
-  ["Requisicao de Materiais", "Raw material invoice", "DM"],
+  ["Aprovação do Projecto", "Project aproval", "DM"],
+  ["Requisição de Materiais", "Raw material invoice", "DM"],
   ["Fresagem", "Milling", "DM"],
-  ["Refrigeracao", "Cooling", "DM"],
-  ["Maquinacao Placas", "Mould Base Machining", "DM"],
-  ["Projecto Electrodos", "Electrodes Project", "DM"],
-  ["Maquinacao de Electrodos", "Electrodes Machining", "DM"],
-  ["Erosao", "Spark Erosion", "DM"],
+  ["Refrigeração", "Cooling", "DM"],
+  ["Maquinação Placas", "Mould Base Machining", "DM"],
+  ["Projecto Eléctrodos", "Electrodes Project", "DM"],
+  ["Maquinação de Eléctrodos", "Electrodes Machining", "DM"],
+  ["Erosão", "Spark Erosion", "DM"],
   ["Polimento", "Polishing", "DM"],
-  ["Rectificacao", "Grinding", "DM"],
+  ["Rectificação", "Grinding", "DM"],
   ["Ajuste e montagem", "Adjustment / Assembling", "DM"],
   ["1as Amostras", "1ST Samples", "DM"],
-  ["Correccoes", "Corrections", "DM"],
-  ["Tratamento Termico", "Heat Treatment", "DM"],
+  ["Correcções", "Corrections", "DM"],
+  ["Tratamento Térmico", "Heat Treatment", "DM"],
   ["2as Amostras", "2nd Samples", "DM"],
   ["Amostras finais / PPAP", "Final Samples /PPAP", "DM"],
-  ["Aprovacao de molde", "Mold approval", ""]
+  ["Aprovação de molde", "Mold approval", ""]
 ];
 
 const planningStatusOptions = ["Tarefa", "Dividir", "Marco", "Sumario", "Resumo de Projeto", "Tarefa Inativa", "Marco Inativo", "Resumo Inativo", "Tarefa Manual", "Apenas-duracao", "Resumo da Agregacao Manual", "Resumo Manual", "Apenas inicio", "Apenas-conclusao", "Tarefas Externas", "Marco Externo", "Prazo", "Progresso", "Progresso Manual"];
@@ -1596,8 +1596,21 @@ function documentText() {
   };
 }
 
+function scheduleDocumentText() {
+  return {
+    schedule: "Cronograma", planning: "Planeamento", clientView: "Visualização do cliente", adminEdit: "Edição do admin",
+    save: "Guardar", print: "Imprimir", downloadPdf: "Download PDF", renumberIds: "Renumerar IDs", newTask: "Nova tarefa", newGroup: "Novo grupo", newField: "Novo campo", clear: "Limpar",
+    scheduleTitle: "Cronograma Construção de Molde", page: "Página 1 de 1", moldNumber: "N. Molde", customerMoldNumber: "Nº Molde Cliente",
+    week: "Semana", projectProgress: "Percentagem do Projeto", operations: "Operações", evolution: "Evolução (%)", planned: "Programado", completed: "Realizado",
+    otherCharacteristics: "Outras características", partReference: "Ref. Peça", injectionWeight: "Peso Moldação (g)", cavities: "N. cavidades",
+    toolWeight: "Peso Molde", dimensions: "Dimensões", lifetime: "Tempo de vida (ciclos)", remarks: "Observações", client: "Cliente", date: "Data",
+    moldPhotos: "Fotos do molde", moldPhotosSubtitle: "Imagens do período de produção do produto", addPhoto: "Adicionar foto", noPhotos: "Sem fotos adicionadas.",
+    photoDescription: "Descrição / Opção escrita"
+  };
+}
+
 function renderDocumentDialogLanguage(type, readonly, reference = "") {
-  const labels = documentText();
+  const labels = type === "schedule" ? scheduleDocumentText() : documentText();
   const planning = type === "planning";
   text(planning ? "#planningDialogTitle" : "#scheduleDialogTitle", `${planning ? labels.planning : labels.schedule} - ${reference}`);
   text(planning ? "#planningDialogMode" : "#scheduleDialogMode", readonly ? labels.clientView : labels.adminEdit);
@@ -3831,7 +3844,7 @@ function openOrderDocument(orderId, documentType) {
 
 function scheduleHtml(order, readonly) {
   const data = order.schedule || {};
-  const labels = documentText();
+  const labels = scheduleDocumentText();
   const disabled = readonly ? "disabled" : "";
   const value = (key, fallback = "") => esc(Object.prototype.hasOwnProperty.call(data, key) ? data[key] : fallback);
   const checked = (key) => data[key] ? "checked" : "";
@@ -3861,21 +3874,40 @@ function scheduleHtml(order, readonly) {
   return `
     <div class="schedule-page" data-order-id="${order.id}" data-readonly="${readonly}">
       <header class="schedule-header">
-        <div><div class="schedule-logo"><span>D</span> DUOMOLD</div><div class="schedule-subtitle">Mold Infinity</div></div>
+        <div><div class="schedule-logo"><span>D</span><strong>UOMOLD</strong></div><div class="schedule-subtitle">Molds Industry</div></div>
         <div><div class="schedule-title">${esc(labels.scheduleTitle)}<small>(Progress Report / Tool identification and property)</small></div><div class="page-no">${esc(labels.page)}</div></div>
       </header>
 
       <section class="schedule-top-grid">
-        <div><label>${esc(labels.moldNumber)}:<input data-schedule="moldNumber" value="${value("moldNumber", order.reference)}" ${disabled}></label></div>
-        <div><label>${esc(labels.customerMoldNumber)}:<input data-schedule="customerMoldNumber" value="${value("customerMoldNumber")}" ${disabled}></label></div>
-        <div><label>${esc(labels.week)}:<input data-schedule="week" value="${value("week")}" ${disabled}></label></div>
-        <div><label>${esc(labels.projectProgress)}:<input value="${esc(order.progress || "0")}% " disabled></label></div>
+        <div class="schedule-top-cell">
+          <div class="schedule-cell-label">${esc("N.º Molde:")}</div>
+          <div class="schedule-cell-sub">${esc("Mold number:")}</div>
+          <input data-schedule="moldNumber" value="${value("moldNumber", order.reference)}" ${disabled}>
+        </div>
+        <div class="schedule-top-cell">
+          <div class="schedule-cell-label">${esc("Nº Molde Cliente:")}</div>
+          <div class="schedule-cell-sub">${esc("Customer mold number:")}</div>
+          <input data-schedule="customerMoldNumber" value="${value("customerMoldNumber")}" ${disabled}>
+        </div>
+        <div class="schedule-top-cell">
+          <div class="schedule-cell-label">${esc("Week:")}</div>
+          <div class="schedule-cell-sub">&nbsp;</div>
+          <input data-schedule="week" value="${value("week")}" ${disabled}>
+        </div>
+        <div class="schedule-top-cell schedule-top-empty">
+          <div class="schedule-cell-label">${esc("Percentagem do Projeto:")}</div>
+          <div class="schedule-cell-sub">${esc("Project percentage:")}</div>
+          <div class="schedule-progress-row">
+            <input class="schedule-progress-input" data-schedule="projectProgress" value="${value("projectProgress", order.progress || "0")}" ${disabled}>
+            <span>%</span>
+          </div>
+        </div>
       </section>
 
       <table class="schedule-table">
-        <colgroup><col style="width:19%"><col style="width:19%"><col style="width:5.3%"><col span="16" style="width:2.85%"><col span="4" style="width:3.8%"></colgroup>
+        <colgroup><col style="width:19%"><col style="width:19%"><col style="width:5.2%"><col span="16" style="width:2.85%"><col span="4" style="width:3.9%"></colgroup>
         <thead>
-          <tr><th colspan="2" rowspan="2">${esc(labels.operations)}</th><th rowspan="2">Resp.</th><th colspan="16">${esc(labels.week)}</th><th colspan="4">${esc(labels.evolution)}</th></tr>
+          <tr><th colspan="2" rowspan="2">Operações / Operations</th><th rowspan="2">Resp.</th><th colspan="16">Semana / Week</th><th colspan="4">Evolução (%)</th></tr>
           <tr>${weekHeader}${[25, 50, 75, 100].map((item) => `<th>${item}</th>`).join("")}</tr>
         </thead>
         <tbody>${rows}</tbody>
@@ -3885,22 +3917,31 @@ function scheduleHtml(order, readonly) {
         <span><i class="legend-box done"></i>${esc(labels.completed)}</span>
       </div>
 
-      <div class="schedule-section-title">${esc(labels.otherCharacteristics)}:</div>
-      <div class="schedule-chars">
-        <div>${esc(labels.partReference)}:<input data-schedule="partReference" value="${value("partReference")}" ${disabled}></div>
-        <div>${esc(labels.injectionWeight)}:<input data-schedule="injectionWeight" value="${value("injectionWeight")}" ${disabled}></div>
-        <div>${esc(labels.cavities)}:<input data-schedule="cavities" value="${value("cavities")}" ${disabled}></div>
-        <div>${esc(labels.toolWeight)}:<input data-schedule="toolWeight" value="${value("toolWeight")}" ${disabled}></div>
-        <div>${esc(labels.dimensions)}:<input data-schedule="dimensions" value="${value("dimensions")}" ${disabled}></div>
-        <div>${esc(labels.lifetime)}:<input data-schedule="lifetime" value="${value("lifetime")}" ${disabled}></div>
+      <div class="schedule-section-title">
+        <strong>Outras características:</strong>
+        <small>Other characteristics:</small>
       </div>
-      <div class="schedule-remarks"><div class="remarks-title">${esc(labels.remarks)}:</div><textarea data-schedule="remarks" ${disabled}>${value("remarks")}</textarea></div>
+      <div class="schedule-chars">
+        <div><span>Ref. Peça:</span><small>Part reference:</small><input data-schedule="partReference" value="${value("partReference")}" ${disabled}></div>
+        <div><span>Peso Moldação (g):</span><small>Injection weight (g):</small><input data-schedule="injectionWeight" value="${value("injectionWeight")}" ${disabled}></div>
+        <div><span>N.º cavidades:</span><small>Number of cavities:</small><input data-schedule="cavities" value="${value("cavities")}" ${disabled}></div>
+        <div><span>Peso Molde:</span><small>Tool weight:</small><input data-schedule="toolWeight" value="${value("toolWeight")}" ${disabled}></div>
+        <div><span>Dimensões:</span><small>Dimensions:</small><input data-schedule="dimensions" value="${value("dimensions")}" ${disabled}></div>
+        <div><span>Tempo de vida (ciclos):</span><small>Life time:</small><input data-schedule="lifetime" value="${value("lifetime")}" ${disabled}></div>
+      </div>
+      <div class="schedule-remarks">
+        <div class="remarks-title">
+          <strong>Observações:</strong>
+          <small>Remarks:</small>
+        </div>
+        <textarea data-schedule="remarks" ${disabled}>${value("remarks")}</textarea>
+      </div>
 
-      ${moldPhotosHtml(order, readonly, "schedule")}
+      ${moldPhotosHtml(order, readonly, "schedule", labels)}
 
       <div class="signatures">
-        <div class="sig"><div class="sig-title">DUOMOLD, Lda.</div><div class="line"></div><div class="date-row">${esc(labels.date)}: <input data-schedule="duoDay" value="${value("duoDay")}" ${disabled}> / <input data-schedule="duoMonth" value="${value("duoMonth")}" ${disabled}> / <input data-schedule="duoYear" value="${value("duoYear")}" ${disabled}></div></div>
-        <div class="sig"><div class="sig-title">${esc(labels.client)}</div><div class="line"></div><div class="date-row">${esc(labels.date)}: <input data-schedule="clientDay" value="${value("clientDay")}" ${disabled}> / <input data-schedule="clientMonth" value="${value("clientMonth")}" ${disabled}> / <input data-schedule="clientYear" value="${value("clientYear")}" ${disabled}></div></div>
+        <div class="sig"><div class="sig-title">DUOMOLD, Lda.</div><div class="line"></div><div class="date-row">Data: <input data-schedule="duoDay" value="${value("duoDay")}" ${disabled}> / <input data-schedule="duoMonth" value="${value("duoMonth")}" ${disabled}> / <input data-schedule="duoYear" value="${value("duoYear")}" ${disabled}></div></div>
+        <div class="sig"><div class="sig-title">Cliente</div><div class="line"></div><div class="date-row">Data: <input data-schedule="clientDay" value="${value("clientDay")}" ${disabled}> / <input data-schedule="clientMonth" value="${value("clientMonth")}" ${disabled}> / <input data-schedule="clientYear" value="${value("clientYear")}" ${disabled}></div></div>
       </div>
       <footer class="schedule-footer">MOD.55.01</footer>
     </div>`;
@@ -3934,25 +3975,27 @@ function moldPhotos(order) {
   return order.moldPhotos;
 }
 
-function moldPhotosHtml(order, readonly, context) {
+function moldPhotosHtml(order, readonly, context, labels = documentText()) {
   const photos = moldPhotos(order);
-  const labels = documentText();
   const empty = readonly ? labels.noPhotos : "Ainda sem fotos. Carregue imagens PNG ou JPEG do período de produção.";
+  const title = context === "schedule" ? "Fotos do molde" : labels.moldPhotos;
+  const titleEn = context === "schedule" ? "Mold photos" : (labels.moldPhotosEnglish || "Mold photos");
   return `
     <section class="mold-photos" data-photo-context="${context}">
       <div class="mold-photos-header">
-        <div>
-          <h3>${esc(labels.moldPhotos)}</h3>
-          <small>${esc(labels.moldPhotosSubtitle)}</small>
+        <div class="mold-photos-copy">
+          <h3>${esc(title)}</h3>
+          <p>${esc(titleEn)}</p>
+          <p>${esc(labels.moldPhotosSubtitle)}</p>
+          <p>${context === "schedule" ? "Product production period images" : "Product manufacturing period images"}</p>
         </div>
         ${readonly ? "" : `<label class="photo-upload-button">${esc(labels.addPhoto)}<input data-photo-upload="${context}" type="file" accept="image/png,image/jpeg" hidden></label>`}
       </div>
-      ${photos.length ? `<div class="mold-photo-grid">${photos.map((photo) => moldPhotoCard(photo, readonly)).join("")}</div>` : `<p class="photo-empty">${empty}</p>`}
+      ${photos.length ? `<div class="mold-photo-grid">${photos.map((photo) => moldPhotoCard(photo, readonly, labels)).join("")}</div>` : `<p class="photo-empty">${empty}</p>`}
     </section>`;
 }
 
-function moldPhotoCard(photo, readonly) {
-  const labels = documentText();
+function moldPhotoCard(photo, readonly, labels = documentText()) {
   return `
     <article class="mold-photo-card" data-photo-id="${photo.id}">
       <img src="${esc(photo.src)}" alt="${esc(photo.caption || "Foto do molde")}">
@@ -4126,7 +4169,7 @@ function planningHtml(order, readonly) {
       <section class="planning-card">
         <label>${esc(labels.observations)}<textarea data-planning-field="observacoes" ${disabled}>${field("observacoes")}</textarea></label>
       </section>
-      ${moldPhotosHtml(order, readonly, "planning")}
+      ${moldPhotosHtml(order, readonly, "planning", labels)}
       <footer class="planning-footer">MOD.54.01</footer>
     </div>`;
 }
@@ -4544,7 +4587,7 @@ function buildSchedulePdfLines(order) {
     `Titulo: ${order.title || ""}`,
     `Cliente: ${clientName(order.clientId)}`,
     `Mold number: ${schedule.moldNumber || order.reference || ""}`,
-    `Progressão: ${schedule.progress || order.progress || "0"}%`,
+    `Percentagem do Projeto: ${schedule.projectProgress || order.progress || "0"}%`,
     "",
     "Resumo dos campos:"
   ];
@@ -4684,20 +4727,17 @@ function downloadTextPdf(filename, documentSpec) {
 }
 
 function buildSchedulePdfDocument(order) {
-  const width = 842;
-  const height = 595;
+  const width = 595.28;
+  const height = 841.89;
   const data = order.schedule || {};
-  const pages = [];
+  const labels = scheduleDocumentText();
   let page = makePdfPage(width, height);
-  drawDocumentHeader(page, width, "DUOMOLD", "Cronograma de Molde", "Progress Report / Tool identification and property");
-  let y = 86;
+  drawDocumentHeader(page, width, "DUOMOLD", labels.scheduleTitle, "(Progress Report / Tool identification and property)");
+  let y = 70;
   y = drawScheduleSummary(page, data, order, width, y);
-  y = drawScheduleTable(page, data, order, width, height, y, pages);
-  const detailsPage = makePdfPage(width, height);
-  drawDocumentHeader(detailsPage, width, "DUOMOLD", "Cronograma de Molde", "Progress Report / Tool identification and property");
-  drawScheduleDetails(detailsPage, data, width, height, 86);
-  pages.push(detailsPage.finish());
-  return { pages, width, height };
+  y = drawScheduleTable(page, data, order, width, height, y);
+  drawScheduleDetails(page, data, width, height, y + 8);
+  return { pages: [page.finish()], width, height };
 }
 
 function buildPlanningPdfDocument(order) {
@@ -4714,10 +4754,10 @@ function buildPlanningPdfDocument(order) {
 }
 
 function drawDocumentHeader(page, width, brand, title, subtitle) {
-  page.text(24, 26, brand, { size: 18, bold: true });
-  page.text(width - 24, 26, title, { size: 16, bold: true, align: "right", width: width - 48 });
-  page.text(width - 24, 46, subtitle, { size: 10, bold: true, align: "right", width: width - 48 });
-  page.line(24, 64, width - 24, 64, 1);
+  page.text(32, 26, brand, { size: 14, bold: true });
+  page.text(width - 32, 26, title, { size: 13, bold: true, align: "right", width: width - 64 });
+  page.text(width - 32, 39, subtitle, { size: 8.5, bold: true, align: "right", width: width - 64 });
+  page.line(24, 58, width - 24, 58, 0.8);
 }
 
 function drawPlanningSummary(page, data, order, width, y) {
@@ -4731,13 +4771,24 @@ function drawPlanningSummary(page, data, order, width, y) {
 }
 
 function drawScheduleSummary(page, data, order, width, y) {
+  const margin = 28;
+  const gap = 0;
   const cols = [
-    { label: "N. Molde", value: data.moldNumber || order.reference || "", width: 180 },
-    { label: "No Molde Cliente", value: data.customerMoldNumber || "", width: 180 },
-    { label: "Week", value: data.week || "", width: 140 },
-    { label: "Percentagem do Projeto", value: `${order.progress || "0"}%`, width: 180 }
+    { pt: "N.º Molde:", en: "Mold number:", value: data.moldNumber || order.reference || "", width: 160 },
+    { pt: "Nº Molde Cliente:", en: "Customer mold number:", value: data.customerMoldNumber || "", width: 136 },
+    { pt: "Week:", en: "", value: data.week || "", width: 126 },
+    { pt: "Percentagem do Projeto:", en: "Project percentage:", value: `${data.projectProgress || order.progress || "0"}%`, width: 117.28 }
   ];
-  return drawInfoGrid(page, cols, 22, y);
+  let x = margin;
+  const boxHeight = 36;
+  cols.forEach((col) => {
+    page.rect(x, y, col.width, boxHeight, { fill: "FFFFFF", stroke: true });
+    if (col.pt) page.text(x + 3, y + 12, col.pt, { size: 12, bold: false });
+    if (col.en) page.text(x + 3, y + 19, col.en, { size: 6.8, bold: false });
+    if (col.value) page.text(x + 3, y + 23, col.value, { size: 10, bold: true });
+    x += col.width + gap;
+  });
+  return y + boxHeight + 8;
 }
 
 function drawInfoGrid(page, cols, margin, startY) {
@@ -4810,81 +4861,107 @@ function drawPlanningTablePages(page, data, width, height, yStart, pages) {
 
 function drawScheduleTable(page, data, order, width, height, yStart, pages) {
   const columns = buildScheduleColumns();
-  const margin = 22;
-  const topY = yStart + 8;
-  const bottomY = height - 26;
-  const headerHeight = 20;
-  let currentPage = page;
+  const margin = 28;
+  const topY = yStart + 3;
+  const header1Height = 13;
+  const header2Height = 11;
+  const rowHeight = 11;
   let y = topY;
-  let pageIndex = 0;
 
-  const drawHeader = (targetPage, label) => {
-    let x = margin;
-    targetPage.text(margin, y - 16, label, { size: 12, bold: true });
-    columns.forEach((col) => {
-      targetPage.rect(x, y, col.width, headerHeight, { fill: "E7EAF0", stroke: true });
-      targetPage.text(x + 1, y + 13, col.label, { size: 6, bold: true, width: col.width - 2, align: "center" });
-      x += col.width;
-    });
-  };
+  let x = margin;
+  page.rect(x, y, columns[0].width + columns[1].width, header1Height, { fill: "C9C9C9", stroke: true });
+  page.text(x + 3, y + 9, "Operações / Operations", { size: 10, bold: true, align: "center", width: columns[0].width + columns[1].width - 6 });
+  x += columns[0].width + columns[1].width;
+  page.rect(x, y, columns[2].width, header1Height, { fill: "C9C9C9", stroke: true });
+  page.text(x + 1, y + 9, "Resp.", { size: 9, bold: true, align: "center", width: columns[2].width - 2 });
+  x += columns[2].width;
+  const weekWidth = columns.slice(3, 19).reduce((sum, col) => sum + col.width, 0);
+  page.rect(x, y, weekWidth, header1Height, { fill: "C9C9C9", stroke: true });
+  page.text(x + 2, y + 9, "Semana / Week", { size: 10, bold: true, align: "center", width: weekWidth - 4 });
+  x += weekWidth;
+  const evolWidth = columns.slice(19).reduce((sum, col) => sum + col.width, 0);
+  page.rect(x, y, evolWidth, header1Height, { fill: "C9C9C9", stroke: true });
+  page.text(x + 2, y + 9, "Evolução (%)", { size: 10, bold: true, align: "center", width: evolWidth - 4 });
+  y += header1Height;
 
-  drawHeader(currentPage, "Operacoes / Operations");
-  y += headerHeight;
+  x = margin + columns[0].width + columns[1].width + columns[2].width;
+  Array.from({ length: 16 }, (_, index) => {
+    const col = columns[3 + index];
+    page.rect(x, y, col.width, header2Height, { fill: "C9C9C9", stroke: true });
+    page.text(x + 1, y + 8, String(index + 1), { size: 8, bold: true, align: "center", width: col.width - 2 });
+    x += col.width;
+  });
+  Array.from({ length: 4 }, (_, index) => {
+    const col = columns[19 + index];
+    page.rect(x, y, col.width, header2Height, { fill: "C9C9C9", stroke: true });
+    page.text(x + 1, y + 8, String([25, 50, 75, 100][index]), { size: 8, bold: true, align: "center", width: col.width - 2 });
+    x += col.width;
+  });
+  y += header2Height;
 
   scheduleOperations.forEach((op, rowIndex) => {
     const values = buildScheduleRowValues(op, rowIndex, data);
-    const rowHeight = 16;
-    if (y + rowHeight > bottomY) {
-      pages.push(currentPage.finish());
-      currentPage = makePdfPage(width, height);
-      pageIndex += 1;
-      drawDocumentHeader(currentPage, width, "DUOMOLD", "Cronograma de Molde", "Progress Report / Tool identification and property");
-      y = 86;
-      drawScheduleSummary(currentPage, data, order, width, y);
-      y = 140;
-      drawHeader(currentPage, `Operacoes / Operations (cont.) ${pageIndex + 1}`);
-      y += headerHeight;
-    }
-    drawTableRow(currentPage, columns, values, margin, y, rowHeight, rowIndex % 2 ? "FBFCFE" : null);
+    drawTableRow(page, columns, values, margin, y, rowHeight, null);
     y += rowHeight;
   });
 
-  pages.push(currentPage.finish());
   return y;
 }
 
 function drawScheduleDetails(page, data, width, height, y) {
-  const margin = 22;
-  const boxTop = Math.max(y + 10, 408);
-  const cols = [
-    { label: "Ref. Peca", value: data.partReference || "", width: 130 },
-    { label: "Peso Moldacao (g)", value: data.injectionWeight || "", width: 130 },
-    { label: "N. cavidades", value: data.cavities || "", width: 110 },
-    { label: "Peso Molde", value: data.toolWeight || "", width: 120 },
-    { label: "Dimensoes", value: data.dimensions || "", width: 120 },
-    { label: "Tempo de vida", value: data.lifetime || "", width: 120 }
+  const margin = 28;
+  let yPos = Math.max(y, 390);
+  page.rect(margin, yPos, width - margin * 2, 12, { fill: "C9C9C9", stroke: true });
+  page.text(margin + 8, yPos + 8, "Outras características:", { size: 11, bold: true });
+  page.text(margin + 8, yPos + 11, "Other characteristics:", { size: 7, bold: true });
+
+  yPos += 12;
+  const boxW = (width - margin * 2) / 3;
+  const labelPairs = [
+    ["Ref. Peça:", "Part reference:", data.partReference || ""],
+    ["Peso Moldação (g):", "Injection weight (g):", data.injectionWeight || ""],
+    ["N.º cavidades:", "Number of cavities:", data.cavities || ""],
+    ["Peso Molde:", "Tool weight:", data.toolWeight || ""],
+    ["Dimensões:", "Dimensions:", data.dimensions || ""],
+    ["Tempo de vida (ciclos):", "Life time:", data.lifetime || ""]
   ];
-  let x = margin;
-  cols.forEach((col) => {
-    page.rect(x, boxTop, col.width, 44, { fill: "FAFAFA", stroke: true });
-    page.text(x + 5, boxTop + 12, col.label, { size: 8, bold: true, width: col.width - 10 });
-    page.text(x + 5, boxTop + 27, col.value || "", { size: 9, width: col.width - 10 });
-    x += col.width;
+  labelPairs.forEach((pair, index) => {
+    const row = Math.floor(index / 3);
+    const col = index % 3;
+    const x = margin + col * boxW;
+    const boxY = yPos + row * 25;
+    page.rect(x, boxY, boxW, 25, { fill: "FFFFFF", stroke: true });
+    page.text(x + 5, boxY + 9, pair[0], { size: 10, bold: true });
+    page.text(x + 5, boxY + 15, pair[1], { size: 7, bold: false });
+    if (pair[2]) page.text(x + 5, boxY + 21, pair[2], { size: 9, bold: true, width: boxW - 10 });
+  });
+
+  yPos += 50;
+  page.rect(margin, yPos, width - margin * 2, 11, { fill: "C9C9C9", stroke: true });
+  page.text(margin + 1, yPos + 8, "Observações:", { size: 11, bold: true });
+  page.text(margin + 1, yPos + 10, "Remarks:", { size: 7, bold: true });
+  const remarksTop = yPos + 11;
+  const remarksHeight = 60;
+  page.rect(margin, remarksTop, width - margin * 2, remarksHeight, { fill: "FFFFFF", stroke: true });
+  [12, 24, 36, 48].forEach((lineOffset) => {
+    page.line(margin, remarksTop + lineOffset, width - margin, remarksTop + lineOffset, 0.4);
   });
   if (data.remarks) {
-    const remarksTop = boxTop + 52;
-    page.rect(margin, remarksTop, width - margin * 2, 42, { fill: "FFFFFF", stroke: true });
-    page.text(margin + 6, remarksTop + 12, "Observações", { size: 9, bold: true });
-    page.text(margin + 6, remarksTop + 26, data.remarks, { size: 9, width: width - margin * 2 - 12 });
+    page.text(margin + 5, remarksTop + 8, data.remarks, { size: 8.5, width: width - margin * 2 - 10 });
   }
-  const sigTop = boxTop + 100;
-  const sigWidth = (width - margin * 2 - 8) / 2;
-  page.rect(margin, sigTop, sigWidth, 54, { fill: "FFFFFF", stroke: true });
-  page.rect(margin + sigWidth + 8, sigTop, sigWidth, 54, { fill: "FFFFFF", stroke: true });
-  page.text(margin + 8, sigTop + 12, "DUOMOLD, Lda.", { size: 10, bold: true });
-  page.text(margin + 8, sigTop + 28, "Data: ____ / ____ / ____", { size: 9 });
-  page.text(margin + sigWidth + 16, sigTop + 12, "Cliente", { size: 10, bold: true });
-  page.text(margin + sigWidth + 16, sigTop + 28, "Data: ____ / ____ / ____", { size: 9 });
+
+  const sigTop = remarksTop + remarksHeight + 14;
+  const sigWidth = (width - margin * 2) / 2;
+  page.rect(margin, sigTop, width - margin * 2, 12, { fill: "C9C9C9", stroke: true });
+  page.text(margin + sigWidth / 2, sigTop + 8, "DUOMOLD, Lda.", { size: 11, bold: false, align: "center", width: sigWidth });
+  page.text(margin + sigWidth + sigWidth / 2, sigTop + 8, "Cliente", { size: 11, bold: false, align: "center", width: sigWidth });
+  const sigBodyTop = sigTop + 12;
+  page.rect(margin, sigBodyTop, sigWidth, 54, { fill: "FFFFFF", stroke: true });
+  page.rect(margin + sigWidth, sigBodyTop, sigWidth, 54, { fill: "FFFFFF", stroke: true });
+  page.line(margin + 24, sigBodyTop + 38, margin + sigWidth - 24, sigBodyTop + 38, 0.5);
+  page.line(margin + sigWidth + 24, sigBodyTop + 38, margin + sigWidth + sigWidth - 24, sigBodyTop + 38, 0.5);
+  page.text(margin + sigWidth / 2, sigBodyTop + 48, "Data: ____ / ____ / ____", { size: 8.5, align: "center", width: sigWidth });
+  page.text(margin + sigWidth + sigWidth / 2, sigBodyTop + 48, "Data: ____ / ____ / ____", { size: 8.5, align: "center", width: sigWidth });
 }
 
 function buildPlanningColumns(data) {
@@ -4912,14 +4989,14 @@ function buildPlanningRowValues(line, data) {
 
 function buildScheduleColumns() {
   return [
-    { label: "ID / Operacoes", width: 180 },
-    { label: "Nome / Operations", width: 180 },
-    { label: "Resp.", width: 44 },
-    ...Array.from({ length: 16 }, (_, index) => ({ label: String(index + 1), width: 12 })),
-    { label: "25", width: 20 },
-    { label: "50", width: 20 },
-    { label: "75", width: 20 },
-    { label: "100", width: 20 }
+    { label: "ID / Operações", width: 102 },
+    { label: "Nome / Operations", width: 102 },
+    { label: "Resp.", width: 26 },
+    ...Array.from({ length: 16 }, (_, index) => ({ label: String(index + 1), width: 14 })),
+    { label: "25", width: 21 },
+    { label: "50", width: 21 },
+    { label: "75", width: 21 },
+    { label: "100", width: 21 }
   ];
 }
 
@@ -5089,8 +5166,7 @@ function exportSchedule() {
 
   const doc = new jsPDF({ orientation: "landscape", unit: "mm", format: "a4" });
   const data = order.schedule || {};
-  const labels = documentText();
-  const english = isClient() && currentClient()?.portalLanguage === "Inglês";
+  const labels = scheduleDocumentText();
   const pageWidth = doc.internal.pageSize.getWidth();
   const pageHeight = doc.internal.pageSize.getHeight();
   const margin = 10;
