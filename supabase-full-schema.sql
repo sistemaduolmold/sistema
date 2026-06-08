@@ -154,7 +154,10 @@ create table if not exists public.mold_photos (
   order_id uuid references public.orders(id) on delete cascade,
   document_type text not null check (document_type in ('planning', 'schedule')),
   image_url text,
-  image_data text,
+  photo_name text not null default '',
+  storage_path text not null default '',
+  mime_type text not null default '',
+  file_size bigint not null default 0,
   description text,
   created_at timestamptz not null default now()
 );
@@ -166,6 +169,12 @@ create table if not exists public.duomold_app_state (
   data jsonb not null default '{}'::jsonb,
   updated_at timestamptz not null default now()
 );
+
+insert into storage.buckets (id, name, public)
+values ('mold-photos', 'mold-photos', true)
+on conflict (id) do update
+set name = excluded.name,
+    public = excluded.public;
 
 create or replace function public.set_updated_at()
 returns trigger
@@ -217,6 +226,7 @@ create index if not exists idx_notifications_target on public.notifications(targ
 create index if not exists idx_planning_rows_order_id on public.planning_rows(order_id);
 create index if not exists idx_schedule_rows_order_id on public.schedule_rows(order_id);
 create index if not exists idx_mold_photos_order_id on public.mold_photos(order_id);
+create unique index if not exists idx_mold_photos_storage_path on public.mold_photos(storage_path) where storage_path <> '';
 
 alter table public.companies enable row level security;
 alter table public.clients enable row level security;
@@ -230,6 +240,28 @@ alter table public.planning_custom_fields enable row level security;
 alter table public.schedule_rows enable row level security;
 alter table public.mold_photos enable row level security;
 alter table public.duomold_app_state enable row level security;
+
+drop policy if exists "mold_photos_select_anon" on storage.objects;
+drop policy if exists "mold_photos_insert_anon" on storage.objects;
+drop policy if exists "mold_photos_update_anon" on storage.objects;
+drop policy if exists "mold_photos_delete_anon" on storage.objects;
+
+create policy "mold_photos_select_anon" on storage.objects
+  for select to anon
+  using (bucket_id = 'mold-photos');
+
+create policy "mold_photos_insert_anon" on storage.objects
+  for insert to anon
+  with check (bucket_id = 'mold-photos');
+
+create policy "mold_photos_update_anon" on storage.objects
+  for update to anon
+  using (bucket_id = 'mold-photos')
+  with check (bucket_id = 'mold-photos');
+
+create policy "mold_photos_delete_anon" on storage.objects
+  for delete to anon
+  using (bucket_id = 'mold-photos');
 
 do $$
 declare

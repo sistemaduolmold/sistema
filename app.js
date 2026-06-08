@@ -1,4 +1,5 @@
-﻿const storageKey = "duomold-demo-v3";
+const storageKey = "duomold-demo-v3";
+const moldPhotoStorageBucket = "mold-photos";
 
 const maxVacationRequestDays = 11;
 const employeeVacationRequestDays = 11;
@@ -11,7 +12,7 @@ const demoData = {
   clientPortalPreferences: {},
   users: [
     { id: "user-admin", employeeNumber: "ADM-001", name: "Administrador", email: "sistemaduolmold@gmail.com", password: "Admin123!", phone: "+351 900 000 001", admissionDate: "2025-01-01", role: "Admin", department: "Direcao", position: "Administrador", status: "Ativo" },
-    { id: "user-rh", employeeNumber: "RH-001", name: "Recursos Humanos", email: "rh@empresa.pt", password: "rh123", phone: "+351 900 000 002", admissionDate: "2025-01-01", role: "RH", department: "Recursos Humanos", position: "Gestor RH", status: "Ativo" },
+    { id: "user-rh", employeeNumber: "RH-001", name: "Recursos Humanos", email: "rh@duomold.pt", password: "rh123", phone: "+351 900 000 002", admissionDate: "2025-01-01", role: "RH", department: "Recursos Humanos", position: "Gestor RH", status: "Ativo" },
     { id: "user-funcionario", employeeNumber: "COL-001", name: "Joao Ferreira", email: "joao@empresa.pt", password: "funcionario123", phone: "+351 900 000 003", admissionDate: "2025-01-01", role: "Funcionario", department: "Producao", position: "Tecnico", status: "Ativo" }
   ],
   orders: [],
@@ -320,6 +321,95 @@ function qs(selector) {
   return document.querySelector(selector);
 }
 
+function isDataUrl(value) {
+  return typeof value === "string" && value.startsWith("data:");
+}
+
+function normalizePhotoName(value, fallback = "Foto do molde") {
+  const cleaned = String(value || "").trim().replace(/\s+/g, " ");
+  return cleaned || fallback;
+}
+
+function sanitizeFileName(value) {
+  return String(value || "photo")
+    .trim()
+    .toLowerCase()
+    .replace(/\.[^.]+$/, "")
+    .replace(/[^a-z0-9]+/gi, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 48) || "photo";
+}
+
+function photoSource(photo) {
+  return photo?.url || photo?.src || "";
+}
+
+function photoSyncSource(photo) {
+  return photo?.url || (!isDataUrl(photo?.src) ? photo?.src : "");
+}
+
+function normalizeMoldPhoto(photo, index = 0) {
+  if (!photo || typeof photo !== "object") return photo;
+  const createdAt = photo.createdAt || photo.created_at || "";
+  const fileName = photo.fileName || photo.filename || "";
+  const url = photo.url || (!isDataUrl(photo.src) ? photo.src : "");
+  const normalized = {
+    ...photo,
+    id: photo.id || `photo-${Date.now()}-${index}`,
+    name: normalizePhotoName(photo.name || photo.caption || fileName, `Foto ${index + 1}`),
+    description: String(photo.description ?? photo.caption ?? "").trim(),
+    url,
+    storagePath: photo.storagePath || photo.storage_path || "",
+    mimeType: photo.mimeType || photo.type || "",
+    fileName,
+    size: Number(photo.size || photo.fileSize || 0),
+    createdAt
+  };
+  if (!normalized.src && isDataUrl(photo.src)) normalized.src = photo.src;
+  return normalized;
+}
+
+function cleanMoldPhotosForSupabase(photos) {
+  return (Array.isArray(photos) ? photos : [])
+    .map(normalizeMoldPhoto)
+    .filter((photo) => Boolean(photoSyncSource(photo) || photo.storagePath))
+    .map((photo) => {
+      const cleaned = {
+        id: photo.id,
+        name: photo.name,
+        description: photo.description,
+        url: photoSyncSource(photo) || "",
+        storagePath: photo.storagePath || "",
+        mimeType: photo.mimeType || "",
+        fileName: photo.fileName || "",
+        size: Number(photo.size || 0),
+        createdAt: photo.createdAt || ""
+      };
+      if (cleaned.url && isDataUrl(cleaned.url)) cleaned.url = "";
+      return cleaned;
+    })
+    .filter((photo) => Boolean(photo.url || photo.storagePath));
+}
+
+function sanitizeStateForSupabase(sourceState) {
+  const sanitized = structuredClone(sourceState);
+  sanitized.orders = (Array.isArray(sanitized.orders) ? sanitized.orders : []).map((order) => ({
+    ...order,
+    moldPhotos: cleanMoldPhotosForSupabase(order.moldPhotos)
+  }));
+  return sanitized;
+}
+
+function photoStoragePath(orderId, photoId, fileName) {
+  const folder = sanitizeFileName(orderId || "order");
+  const baseName = sanitizeFileName(fileName || photoId || "photo");
+  return `${folder}/${photoId}-${baseName}`;
+}
+
+function uploadPhotoBucket() {
+  return supabaseClient?.storage?.from?.(moldPhotoStorageBucket) || null;
+}
+
 function loadState() {
   try {
     const saved = JSON.parse(localStorage.getItem(storageKey) || "null");
@@ -365,7 +455,10 @@ function mergeState(saved) {
     if (!adminUser.email || adminUser.email === "admin@empresa.pt") adminUser.email = "sistemaduolmold@gmail.com";
     if (!adminUser.password || adminUser.password === "admin123") adminUser.password = "Admin123!";
   }
-  merged.orders = merged.orders.map(normalizeOrderText);
+  merged.orders = merged.orders.map((order) => ({
+    ...normalizeOrderText(order),
+    moldPhotos: Array.isArray(order.moldPhotos) ? order.moldPhotos.map(normalizeMoldPhoto) : []
+  }));
   if (!merged.activeAccount) merged.activeAccount = "user:user-admin";
   localStorage.setItem(storageKey, JSON.stringify(merged));
   return merged;
@@ -508,12 +601,16 @@ async function saveStateToSupabase() {
 }
 
 function appStatePayload() {
+  const orders = (Array.isArray(state.orders) ? state.orders : []).map((order) => ({
+    ...order,
+    moldPhotos: cleanMoldPhotosForSupabase(order.moldPhotos)
+  }));
   return {
     ...state,
     companies: [],
     clients: [],
     users: [],
-    orders: [],
+    orders,
     vacations: [],
     absences: []
   };
@@ -680,7 +777,7 @@ function renderAccountSelector() {
   if (accountSwitcher) accountSwitcher.hidden = !adminSessionAccount;
   const userOptions = adminSessionAccount
     ? state.users
-      .filter((user) => ["Admin", "RH"].includes(user.role))
+      .filter((user) => user.role === "Admin" || (user.role === "RH" && user.email?.toLowerCase() === "rh@duomold.pt"))
       .map((user) => ({ value: `user:${user.id}`, label: `${user.name} - ${user.role}` }))
     : state.users.map((user) => ({ value: `user:${user.id}`, label: `${user.name} - ${user.role}` }));
   const options = [...userOptions];
@@ -983,7 +1080,7 @@ function mapOrderFromSupabase(row) {
     history: Array.isArray(row.history) ? row.history : undefined,
     schedule: row.schedule || undefined,
     planning: row.planning || undefined,
-    moldPhotos: Array.isArray(row.mold_photos) ? row.mold_photos : undefined
+    moldPhotos: Array.isArray(row.mold_photos) ? row.mold_photos.map(normalizeMoldPhoto) : undefined
   });
   if (!hasPlanningFlag) delete mapped.showPlanningToClient;
   if (!hasScheduleFlag) delete mapped.showScheduleToClient;
@@ -1106,7 +1203,7 @@ function orderToSupabase(order) {
     history: Array.isArray(order.history) ? order.history : [],
     schedule: order.schedule || {},
     planning: order.planning || null,
-    mold_photos: Array.isArray(order.moldPhotos) ? order.moldPhotos : []
+    mold_photos: cleanMoldPhotosForSupabase(order.moldPhotos)
   };
 }
 
@@ -1577,7 +1674,7 @@ function documentText() {
     otherCharacteristics: "Other characteristics", partReference: "Part reference", injectionWeight: "Injection weight (g)", cavities: "Number of cavities",
     toolWeight: "Tool weight", dimensions: "Dimensions", lifetime: "Life time (cycles)", remarks: "Remarks", client: "Client", date: "Date",
     moldPhotos: "Mold photos", moldPhotosSubtitle: "Product manufacturing period images", addPhoto: "Add photo", noPhotos: "No photos added.",
-    photoDescription: "Description / Written option", planningTitle: "Mold Planning - MOD.54.01",
+    photoName: "Image name", photoNamePlaceholder: "Example: Final mold photo", photoDescription: "Description / Written option", planningTitle: "Mold Planning - MOD.54.01",
     columns: "Columns: ID - Task Name - Duration - Start - Completion - Project Percentage", project: "Project", mold: "Mold No.", taskName: "Task Name",
     duration: "Duration", start: "Start", completion: "Completion", projectPercentage: "Project Percentage", actions: "Actions", observations: "Remarks",
     readonlyNote: "Client view. Editing is available only to the Admin.", fieldsNote: "Created fields appear as columns in the worksheet."
@@ -1589,7 +1686,7 @@ function documentText() {
     otherCharacteristics: "Outras características", partReference: "Ref. Peça", injectionWeight: "Peso Moldação (g)", cavities: "N. cavidades",
     toolWeight: "Peso Molde", dimensions: "Dimensões", lifetime: "Tempo de vida (ciclos)", remarks: "Observações", client: "Cliente", date: "Data",
     moldPhotos: "Fotos do molde", moldPhotosSubtitle: "Imagens do período de produção do produto", addPhoto: "Adicionar foto", noPhotos: "Sem fotos adicionadas.",
-    photoDescription: "Descrição / Opção escrita", planningTitle: "Planeamento do Molde - MOD.54.01",
+    photoName: "Nome da imagem", photoNamePlaceholder: "Ex.: Foto final do molde", photoDescription: "Descrição / Opção escrita", planningTitle: "Planeamento do Molde - MOD.54.01",
     columns: "Colunas: ID - Nome da Tarefa - Duração - Início - Conclusão - Percentagem do Projeto", project: "Projeto", mold: "N. Molde", taskName: "Nome da Tarefa",
     duration: "Duração", start: "Início", completion: "Conclusão", projectPercentage: "Percentagem do Projeto", actions: "Ações", observations: "Observações",
     readonlyNote: "Visualização do cliente. A edição fica disponível apenas para Admin.", fieldsNote: "Os campos criados aparecem como colunas dentro da planilha."
@@ -1605,7 +1702,7 @@ function scheduleDocumentText() {
     otherCharacteristics: "Outras características", partReference: "Ref. Peça", injectionWeight: "Peso Moldação (g)", cavities: "N. cavidades",
     toolWeight: "Peso Molde", dimensions: "Dimensões", lifetime: "Tempo de vida (ciclos)", remarks: "Observações", client: "Cliente", date: "Data",
     moldPhotos: "Fotos do molde", moldPhotosSubtitle: "Imagens do período de produção do produto", addPhoto: "Adicionar foto", noPhotos: "Sem fotos adicionadas.",
-    photoDescription: "Descrição / Opção escrita"
+    photoName: "Nome da imagem", photoNamePlaceholder: "Ex.: Foto final do molde", photoDescription: "Descrição / Opção escrita"
   };
 }
 
@@ -3890,16 +3987,18 @@ function scheduleHtml(order, readonly) {
           <input data-schedule="customerMoldNumber" value="${value("customerMoldNumber")}" ${disabled}>
         </div>
         <div class="schedule-top-cell">
-          <div class="schedule-cell-label">${esc("Week:")}</div>
-          <div class="schedule-cell-sub">&nbsp;</div>
+          <div class="schedule-cell-label">${esc("Semana:")}</div>
+          <div class="schedule-cell-sub">${esc("Week")}</div>
           <input data-schedule="week" value="${value("week")}" ${disabled}>
         </div>
         <div class="schedule-top-cell schedule-top-empty">
           <div class="schedule-cell-label">${esc("Percentagem do Projeto:")}</div>
           <div class="schedule-cell-sub">${esc("Project percentage:")}</div>
           <div class="schedule-progress-row">
-            <input class="schedule-progress-input" data-schedule="projectProgress" value="${value("projectProgress", order.progress || "0")}" ${disabled}>
-            <span>%</span>
+            <div class="schedule-progress-value">
+              <input class="schedule-progress-input" data-schedule="projectProgress" value="${value("projectProgress", order.progress || "0")}" ${disabled}>
+              <span>%</span>
+            </div>
           </div>
         </div>
       </section>
@@ -3972,6 +4071,7 @@ function exportSchedule() {
 
 function moldPhotos(order) {
   if (!Array.isArray(order.moldPhotos)) order.moldPhotos = [];
+  order.moldPhotos = order.moldPhotos.map((photo, index) => normalizeMoldPhoto(photo, index));
   return order.moldPhotos;
 }
 
@@ -3996,11 +4096,17 @@ function moldPhotosHtml(order, readonly, context, labels = documentText()) {
 }
 
 function moldPhotoCard(photo, readonly, labels = documentText()) {
+  const photoUrl = photoSource(photo);
   return `
     <article class="mold-photo-card" data-photo-id="${photo.id}">
-      <img src="${esc(photo.src)}" alt="${esc(photo.caption || "Foto do molde")}">
+      <button class="mold-photo-preview" data-photo-open="${photo.id}" type="button" ${photoUrl ? "" : "disabled"}>
+        <img src="${esc(photoUrl)}" alt="${esc(photo.name || "Foto do molde")}">
+      </button>
+      <label>${esc(labels.photoName)}
+        <input data-photo-name="${photo.id}" type="text" value="${esc(photo.name || "")}" ${readonly ? "disabled" : ""}>
+      </label>
       <label>${esc(labels.photoDescription)}
-        <textarea data-photo-caption="${photo.id}" ${readonly ? "disabled" : ""}>${esc(photo.caption || "")}</textarea>
+        <textarea data-photo-description="${photo.id}" ${readonly ? "disabled" : ""}>${esc(photo.description || "")}</textarea>
       </label>
       ${readonly ? "" : `<button class="planning-mini red" data-photo-delete="${photo.id}" type="button">X</button>`}
     </article>`;
@@ -4018,7 +4124,7 @@ function refreshDocument(context, order, readonly) {
   if (context === "planning") qs("#planningBody").innerHTML = planningHtml(order, readonly);
 }
 
-function handlePhotoUpload(input) {
+async function handlePhotoUpload(input) {
   const { order, readonly, context } = activeDocumentOrder(input);
   if (!order || readonly || !input.files?.[0]) return;
   const file = input.files[0];
@@ -4027,39 +4133,94 @@ function handlePhotoUpload(input) {
     input.value = "";
     return;
   }
-  const reader = new FileReader();
-  reader.onload = () => {
+  const photoId = `photo-${Date.now()}`;
+  const displayName = normalizePhotoName(file.name, file.name.replace(/\.[^.]+$/, ""));
+  const storage = uploadPhotoBucket();
+  if (!storage) {
+    alert("O upload das imagens requer ligação ao Supabase Storage.");
+    return;
+  }
+  try {
+    const storagePath = photoStoragePath(order.id, photoId, file.name);
+    const { error: uploadError } = await storage.upload(storagePath, file, {
+      upsert: false,
+      cacheControl: "3600",
+      contentType: file.type
+    });
+    if (uploadError) throw uploadError;
+    const { data } = storage.getPublicUrl(storagePath);
     moldPhotos(order).push({
-      id: `photo-${Date.now()}`,
-      name: file.name,
-      type: file.type,
-      src: reader.result,
-      caption: ""
+      id: photoId,
+      name: displayName,
+      description: "",
+      url: data?.publicUrl || "",
+      storagePath,
+      mimeType: file.type,
+      fileName: file.name,
+      size: file.size,
+      createdAt: new Date().toISOString()
     });
     persistStateOnly();
     scheduleOrderClientNotification(order);
     refreshDocument(context, order, readonly);
-  };
-  reader.readAsDataURL(file);
+  } catch (error) {
+    console.warn("Nao foi possivel guardar a imagem no Supabase Storage.", error);
+    alert("Não foi possível guardar a imagem no Supabase Storage. Confirme o bucket e as permissões.");
+  } finally {
+    input.value = "";
+  }
 }
 
-function savePhotoCaption(target) {
+function savePhotoName(target) {
   const { order, readonly } = activeDocumentOrder(target);
   if (!order || readonly) return;
-  const photo = moldPhotos(order).find((item) => item.id === target.dataset.photoCaption);
+  const photo = moldPhotos(order).find((item) => item.id === target.dataset.photoName);
   if (!photo) return;
-  photo.caption = target.value;
+  photo.name = normalizePhotoName(target.value, photo.name);
   persistStateOnly();
   scheduleOrderClientNotification(order);
 }
 
-function deletePhoto(target) {
+function savePhotoDescription(target) {
+  const { order, readonly } = activeDocumentOrder(target);
+  if (!order || readonly) return;
+  const photo = moldPhotos(order).find((item) => item.id === target.dataset.photoDescription);
+  if (!photo) return;
+  photo.description = target.value;
+  persistStateOnly();
+  scheduleOrderClientNotification(order);
+}
+
+async function deletePhoto(target) {
   const { order, readonly, context } = activeDocumentOrder(target);
   if (!order || readonly || !confirm("Remover esta foto?")) return;
-  order.moldPhotos = moldPhotos(order).filter((item) => item.id !== target.dataset.photoDelete);
+  const photos = moldPhotos(order);
+  const photo = photos.find((item) => item.id === target.dataset.photoDelete);
+  order.moldPhotos = photos.filter((item) => item.id !== target.dataset.photoDelete);
   persistStateOnly();
   scheduleOrderClientNotification(order);
   refreshDocument(context, order, readonly);
+  if (photo?.storagePath) {
+    const storage = uploadPhotoBucket();
+    if (storage) {
+      try {
+        await storage.remove([photo.storagePath]);
+      } catch (error) {
+        console.warn("Nao foi possivel remover a imagem do Supabase Storage.", error);
+      }
+    }
+  }
+}
+
+function openPhoto(photoId) {
+  const page = qs(".schedule-page, .planning-page");
+  if (!page) return;
+  const order = findOrderById(page.dataset.orderId);
+  if (!order) return;
+  const photo = moldPhotos(order).find((item) => item.id === photoId);
+  const url = photoSource(photo);
+  if (!url) return;
+  window.open(url, "_blank", "noopener,noreferrer");
 }
 
 function today() {
@@ -4486,6 +4647,10 @@ document.addEventListener("click", (event) => {
     fn(mode, target.closest(`[data-${key}]`).dataset[toDatasetKey(key)]);
   }
   if (target.closest("[data-new-client-order]")) openDialog("order", null, { clientId: target.closest("[data-new-client-order]").dataset.newClientOrder });
+  if (target.closest("[data-photo-open]")) {
+    openPhoto(target.closest("[data-photo-open]").dataset.photoOpen);
+    return;
+  }
   if (target.closest("[data-planning-delete-row]")) {
     const { data, readonly } = activePlanning();
     if (data && !readonly && confirm("Eliminar esta tarefa?")) {
@@ -4516,7 +4681,8 @@ document.addEventListener("click", (event) => {
 document.addEventListener("input", (event) => {
   if (event.target.closest("#scheduleDialog")) saveSchedule();
   if (event.target.closest("#planningDialog")) savePlanningField(event.target);
-  if (event.target.matches("[data-photo-caption]")) savePhotoCaption(event.target);
+  if (event.target.matches("[data-photo-name]")) savePhotoName(event.target);
+  if (event.target.matches("[data-photo-description]")) savePhotoDescription(event.target);
 });
 
 document.addEventListener("change", (event) => {
@@ -4529,7 +4695,7 @@ document.addEventListener("change", (event) => {
     return;
   }
   if (event.target.matches("[data-photo-upload]")) {
-    handlePhotoUpload(event.target);
+    void handlePhotoUpload(event.target);
     return;
   }
   if (event.target.matches("[data-absence-attachment-upload]")) {
@@ -4776,15 +4942,15 @@ function drawScheduleSummary(page, data, order, width, y) {
   const cols = [
     { pt: "N.º Molde:", en: "Mold number:", value: data.moldNumber || order.reference || "", width: 160 },
     { pt: "Nº Molde Cliente:", en: "Customer mold number:", value: data.customerMoldNumber || "", width: 136 },
-    { pt: "Week:", en: "", value: data.week || "", width: 126 },
-    { pt: "Percentagem do Projeto:", en: "Project percentage:", value: `${data.projectProgress || order.progress || "0"}%`, width: 117.28 }
+    { pt: "Semana:", en: "Week", value: data.week || "", width: 126 },
+    { pt: "Percentagem do Projeto:", en: "Project percentage:", value: `${data.projectProgress || order.progress || "0"} %`, width: 117.28 }
   ];
   let x = margin;
   const boxHeight = 36;
   cols.forEach((col) => {
     page.rect(x, y, col.width, boxHeight, { fill: "FFFFFF", stroke: true });
-    if (col.pt) page.text(x + 3, y + 12, col.pt, { size: 12, bold: false });
-    if (col.en) page.text(x + 3, y + 19, col.en, { size: 6.8, bold: false });
+    if (col.pt) page.text(x + 3, y + 12, col.pt, { size: 12, bold: true });
+    if (col.en) page.text(x + 3, y + 19, col.en, { size: 7.5, bold: false });
     if (col.value) page.text(x + 3, y + 23, col.value, { size: 10, bold: true });
     x += col.width + gap;
   });
@@ -4877,7 +5043,8 @@ function drawScheduleTable(page, data, order, width, height, yStart, pages) {
   x += columns[2].width;
   const weekWidth = columns.slice(3, 19).reduce((sum, col) => sum + col.width, 0);
   page.rect(x, y, weekWidth, header1Height, { fill: "C9C9C9", stroke: true });
-  page.text(x + 2, y + 9, "Semana / Week", { size: 10, bold: true, align: "center", width: weekWidth - 4 });
+  page.text("Semana", { x: x + 2, y: y + 5, size: 10, bold: true, align: "center", width: weekWidth - 4 });
+  page.text("Week", { x: x + 2, y: y + 15, size: 8, bold: true, align: "center", width: weekWidth - 4 });
   x += weekWidth;
   const evolWidth = columns.slice(19).reduce((sum, col) => sum + col.width, 0);
   page.rect(x, y, evolWidth, header1Height, { fill: "C9C9C9", stroke: true });

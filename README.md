@@ -12,7 +12,7 @@ Abra o ficheiro `index.html` no navegador.
 Entre com um destes acessos e use o seletor "Ver como" na lateral para demonstrar outros perfis:
 
 - Admin: sistemaduolmold@gmail.com / Admin123!
-- RH: rh@empresa.pt / rh123
+- RH: rh@duomold.pt / rh123
 - Funcionario: joao@empresa.pt / funcionario123
 - Cliente: ana@metalnorte.pt / cliente123
 
@@ -22,6 +22,8 @@ O projeto esta configurado para o Supabase `wdgoqfixddwrgycplexi`.
 
 Como ainda nao existem tabelas criadas, abra o Supabase SQL Editor e execute primeiro o ficheiro `supabase-full-schema.sql`.
 Ele cria o banco completo do projeto, com clientes, empresas, utilizadores, encomendas, ferias, faltas, notificacoes, planeamento, cronograma e fotos dos moldes.
+
+Para bases de dados ja existentes, execute também `supabase-mold-photos-storage.sql`. Esse script cria o bucket `mold-photos` no Supabase Storage e garante o campo `orders.mold_photos` como JSONB, para que as imagens novas sejam guardadas como ficheiros e nao como texto na BD.
 
 O ficheiro `supabase-schema.sql` cria apenas a tabela simples de sincronizacao da versao atual do HTML. Use o `supabase-full-schema.sql` para criar o projeto inteiro.
 

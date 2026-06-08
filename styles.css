@@ -1506,10 +1506,18 @@ dialog {
 
 .schedule-top-empty {
   background: #fff;
+  justify-content: flex-start;
 }
 
 .schedule-top-empty .schedule-progress-row {
+  flex: 0 0 auto;
   margin-top: 6px;
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 6px;
+  width: 100%;
 }
 
 .schedule-cell-label {
@@ -1530,21 +1538,31 @@ dialog {
 }
 
 .schedule-progress-row {
-  display: inline-flex;
-  align-items: baseline;
-  gap: 2px;
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 6px;
   margin-top: 4px;
+  width: 100%;
+}
+
+.schedule-progress-value {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
 }
 
 .schedule-progress-input {
-  width: 46px;
-  text-align: right;
-  padding: 5px 2px 5px 4px;
+  width: 54px !important;
+  flex: 0 0 54px;
+  text-align: left;
+  padding: 5px 6px 5px 4px;
 }
 
 .schedule-progress-row span {
   font-size: 15px;
   font-weight: 700;
+  line-height: 1;
 }
 
 .schedule-page label small,
@@ -2311,13 +2329,14 @@ dialog {
 
 .mold-photo-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(180px, 220px));
+  justify-content: start;
   gap: 12px;
 }
 
 @media (min-width: 1320px) {
   .mold-photo-grid {
-    grid-template-columns: repeat(6, 1fr);
+    grid-template-columns: repeat(auto-fit, minmax(180px, 220px));
   }
 }
 
@@ -2328,7 +2347,19 @@ dialog {
   background: #fff;
 }
 
-.mold-photo-card img {
+.mold-photo-preview {
+  width: 100%;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  cursor: zoom-in;
+}
+
+.mold-photo-preview:disabled {
+  cursor: default;
+}
+
+.mold-photo-preview img {
   width: 100%;
   aspect-ratio: 4 / 3;
   object-fit: cover;
@@ -2345,13 +2376,22 @@ dialog {
   font-weight: 800;
 }
 
+.mold-photo-card input,
 .mold-photo-card textarea {
   width: 100%;
-  min-height: 58px;
-  resize: vertical;
   border: 1px solid #d7dde5;
   border-radius: 6px;
   padding: 7px;
+  background: #fff;
+}
+
+.mold-photo-card input {
+  min-height: 38px;
+}
+
+.mold-photo-card textarea {
+  min-height: 58px;
+  resize: vertical;
 }
 
 .mold-photo-card .planning-mini {
@@ -2791,7 +2831,8 @@ dialog::backdrop {
   }
 
   .schedule-progress-input {
-    width: 42px;
+    width: 42px !important;
+    flex-basis: 42px;
   }
 
   .record-attachments-header {
