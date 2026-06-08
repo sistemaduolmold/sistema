@@ -1677,7 +1677,7 @@ function documentText() {
     photoName: "Image name", photoNamePlaceholder: "Example: Final mold photo", photoDescription: "Description / Written option", planningTitle: "Mold Planning - MOD.54.01",
     columns: "Columns: ID - Task Name - Duration - Start - Completion - Project Percentage", project: "Project", mold: "Mold No.", taskName: "Task Name",
     duration: "Duration", start: "Start", completion: "Completion", projectPercentage: "Project Percentage", actions: "Actions", observations: "Remarks",
-    readonlyNote: "Client view. Editing is available only to the Admin.", fieldsNote: "Created fields appear as columns in the worksheet."
+    readonlyNote: "Client view. You can change the date to check the project percentage; editing remains available only to the Admin.", fieldsNote: "Created fields appear as columns in the worksheet."
   } : {
     schedule: "Cronograma", planning: "Planeamento", clientView: "Visualização do cliente", adminEdit: "Edição do admin",
     save: "Guardar", print: "Imprimir", downloadPdf: "Download PDF", renumberIds: "Renumerar IDs", newTask: "Nova tarefa", newGroup: "Novo grupo", newField: "Novo campo", clear: "Limpar",
@@ -1689,7 +1689,7 @@ function documentText() {
     photoName: "Nome da imagem", photoNamePlaceholder: "Ex.: Foto final do molde", photoDescription: "Descrição / Opção escrita", planningTitle: "Planeamento do Molde - MOD.54.01",
     columns: "Colunas: ID - Nome da Tarefa - Duração - Início - Conclusão - Percentagem do Projeto", project: "Projeto", mold: "N. Molde", taskName: "Nome da Tarefa",
     duration: "Duração", start: "Início", completion: "Conclusão", projectPercentage: "Percentagem do Projeto", actions: "Ações", observations: "Observações",
-    readonlyNote: "Visualização do cliente. A edição fica disponível apenas para Admin.", fieldsNote: "Os campos criados aparecem como colunas dentro da planilha."
+    readonlyNote: "Visualização do cliente. Pode alterar a data para consultar a percentagem do projeto; a edição fica disponível apenas para Admin.", fieldsNote: "Os campos criados aparecem como colunas dentro da planilha."
   };
 }
 
@@ -4239,11 +4239,11 @@ function defaultPlanning(order) {
   };
 }
 
-function planningFor(order) {
+function planningFor(order, previewDate = "") {
   if (!order.planning) order.planning = defaultPlanning(order);
   if (!Array.isArray(order.planning.campos)) order.planning.campos = [];
   if (!Array.isArray(order.planning.linhas) || !order.planning.linhas.length) order.planning.linhas = structuredClone(planningBase);
-  const planningDate = planningCurrentDate(order);
+  const planningDate = planningCurrentDate(order, previewDate);
   order.planning.linhas.forEach((line, index) => {
     if (!line.id) line.id = index + 1;
     if (!line.statusByDate || typeof line.statusByDate !== "object" || Array.isArray(line.statusByDate)) {
@@ -4274,16 +4274,21 @@ function planningStatusForDate(line, planningDate) {
   return nearestDate ? values[nearestDate] : "0%";
 }
 
-function planningCurrentDate(order) {
-  return order?.planning?.data || today();
+function planningCurrentDate(order, previewDate = "") {
+  return previewDate || order?.planning?.data || today();
 }
 
 function planningHtml(order, readonly) {
-  const data = planningFor(order);
+  const previewDate = readonly ? currentPlanningPreviewDate() : "";
+  const data = planningFor(order, previewDate);
   const labels = documentText();
   const disabled = readonly ? "disabled" : "";
   const readonlyClass = readonly ? " readonly" : "";
   const field = (key) => esc(data[key] ?? "");
+  const topFieldAttrs = (key, type = "text") => {
+    if (!readonly) return "";
+    return key === "data" && type === "date" ? 'data-planning-preview="true"' : "disabled";
+  };
   const extraHeaders = data.campos.map((campo, index) => `
     <th class="planning-extra">${esc(campo.nome)}
       ${readonly ? "" : `<button class="planning-mini red" data-planning-delete-field="${index}" type="button">X</button>`}
@@ -4291,7 +4296,7 @@ function planningHtml(order, readonly) {
   const rows = data.linhas.map((line, index) => planningRowHtml(line, index, data.campos, disabled, readonly)).join("");
 
   return `
-    <div class="planning-page${readonlyClass}" data-order-id="${order.id}" data-readonly="${readonly}">
+    <div class="planning-page${readonlyClass}" data-order-id="${order.id}" data-readonly="${readonly}" data-preview-date="${esc(previewDate)}">
       <header class="planning-header">
         <div>
           <h2>${esc(labels.planningTitle)}</h2>
@@ -4301,10 +4306,10 @@ function planningHtml(order, readonly) {
 
       <section class="planning-card">
         <div class="planning-grid">
-          <label>${esc(labels.project)}<input data-planning-field="projeto" value="${field("projeto")}" ${disabled}></label>
-          <label>${esc(labels.client)}<input data-planning-field="cliente" value="${field("cliente")}" ${disabled}></label>
-          <label>${esc(labels.mold)}<input data-planning-field="molde" value="${field("molde")}" ${disabled}></label>
-          <label>${esc(labels.date)}<input data-planning-field="data" type="date" value="${field("data")}" ${disabled}></label>
+          <label>${esc(labels.project)}<input data-planning-field="projeto" value="${field("projeto")}" ${topFieldAttrs("projeto")}></label>
+          <label>${esc(labels.client)}<input data-planning-field="cliente" value="${field("cliente")}" ${topFieldAttrs("cliente")}></label>
+          <label>${esc(labels.mold)}<input data-planning-field="molde" value="${field("molde")}" ${topFieldAttrs("molde")}></label>
+          <label>${esc(labels.date)}<input data-planning-field="data" type="date" value="${esc(previewDate || data.data || "")}" ${topFieldAttrs("data", "date")}></label>
         </div>
         <p class="planning-note">${esc(readonly ? labels.readonlyNote : labels.fieldsNote)}</p>
       </section>
@@ -4364,14 +4369,27 @@ function activePlanning() {
   const page = qs(".planning-page");
   if (!page) return {};
   const order = findOrderById(page.dataset.orderId);
-  return { page, order, data: order ? planningFor(order) : null, readonly: page.dataset.readonly === "true" };
+  const previewDate = page.dataset.previewDate || "";
+  return { page, order, data: order ? planningFor(order, previewDate) : null, readonly: page.dataset.readonly === "true", previewDate };
+}
+
+function currentPlanningPreviewDate() {
+  const page = qs(".planning-page");
+  return page?.dataset.previewDate || "";
 }
 
 function savePlanningField(target) {
-  const { order, data, readonly } = activePlanning();
-  if (!data || readonly) return;
+  const { order, data, readonly, page } = activePlanning();
+  if (!data) return;
   const topField = target.dataset.planningField;
   if (topField) {
+    if (readonly) {
+      if (topField === "data" && target.dataset.planningPreview === "true") {
+        page.dataset.previewDate = target.value || "";
+        qs("#planningBody").innerHTML = planningHtml(order, true);
+      }
+      return;
+    }
     data[topField] = target.value;
     if (topField === "data") {
       persistStateOnly();
@@ -4605,9 +4623,23 @@ qs("#exportButton").addEventListener("click", exportCurrentViewPdf);
 qs("#ordersTable")?.addEventListener("click", handleOrderDocumentButtonClick);
 qs("#clientOrdersTable")?.addEventListener("click", handleOrderDocumentButtonClick);
 
+document.addEventListener("pointerdown", (event) => {
+  const target = event.target instanceof Element ? event.target : null;
+  const radio = target?.closest('#scheduleDialog input[type="radio"][data-schedule^="r"][data-schedule*="_e"]');
+  if (!(radio instanceof HTMLInputElement)) return;
+  radio.dataset.wasChecked = radio.checked ? "true" : "false";
+});
+
 document.addEventListener("click", (event) => {
   const target = event.target instanceof Element ? event.target : event.target?.parentElement;
   if (!target) return;
+  const evolutionRadio = target.closest('#scheduleDialog input[type="radio"][data-schedule^="r"][data-schedule*="_e"]');
+  if (evolutionRadio instanceof HTMLInputElement && evolutionRadio.dataset.wasChecked === "true") {
+    evolutionRadio.checked = false;
+    delete evolutionRadio.dataset.wasChecked;
+    saveSchedule();
+    return;
+  }
   if (!target.closest(".notification-wrap")) qs("#notificationPanel").hidden = true;
   if (target.closest("[data-notification-open]")) {
     openNotification(target.closest("[data-notification-open]").dataset.notificationOpen);
@@ -4686,6 +4718,9 @@ document.addEventListener("input", (event) => {
 });
 
 document.addEventListener("change", (event) => {
+  if (event.target instanceof HTMLInputElement && event.target.matches('#scheduleDialog input[type="radio"][data-schedule^="r"][data-schedule*="_e"]')) {
+    delete event.target.dataset.wasChecked;
+  }
   if (event.target.matches("[data-vacation-extra-days]")) {
     const user = state.users.find((item) => item.id === event.target.dataset.vacationExtraDays);
     if (user && ["Admin", "RH"].includes(role())) {
