@@ -2325,6 +2325,73 @@ dialog {
   color: #ffffff !important;
   font-weight: 800;
   cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.mold-photo-folders {
+  display: grid;
+  gap: 14px;
+}
+
+.mold-photo-folder {
+  border: 1px solid #d7dde5;
+  background: #fbfcfe;
+  padding: 12px;
+  border-radius: 8px;
+}
+
+.mold-photo-folder-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: flex-start;
+  margin-bottom: 12px;
+  flex-wrap: wrap;
+}
+
+.mold-photo-folder-title {
+  display: grid;
+  gap: 6px;
+  min-width: min(360px, 100%);
+}
+
+.mold-photo-folder-title span {
+  font-size: 12px;
+  font-weight: 800;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.mold-photo-folder-title strong {
+  font-size: 18px;
+  color: #101828;
+}
+
+.mold-photo-folder-title input {
+  width: min(360px, 100%);
+  border: 1px solid #d7dde5;
+  border-radius: 8px;
+  padding: 8px 10px;
+  font-size: 15px;
+  font-weight: 800;
+  background: #fff;
+}
+
+.mold-photo-folder-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  justify-content: flex-end;
+}
+
+.mold-photo-folder-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
 }
 
 .mold-photo-grid {
@@ -2345,6 +2412,8 @@ dialog {
   border: 1px solid #d7dde5;
   padding: 8px;
   background: #fff;
+  display: grid;
+  gap: 8px;
 }
 
 .mold-photo-preview {
@@ -2365,7 +2434,39 @@ dialog {
   object-fit: cover;
   display: block;
   border: 1px solid #d7dde5;
-  margin-bottom: 8px;
+}
+
+.mold-photo-archive {
+  width: 100%;
+  min-height: 140px;
+  display: grid;
+  align-items: center;
+  justify-items: center;
+  gap: 8px;
+  border: 1px dashed #d7dde5;
+  background: linear-gradient(180deg, #f8fafc, #eef2f7);
+  color: #263238;
+  padding: 12px;
+  text-align: center;
+}
+
+.mold-photo-archive strong {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 54px;
+  padding: 6px 10px;
+  border-radius: 999px;
+  background: #0f172a;
+  color: #fff;
+  font-size: 12px;
+  letter-spacing: 0.08em;
+}
+
+.mold-photo-archive span {
+  font-size: 12px;
+  font-weight: 700;
+  word-break: break-word;
 }
 
 .mold-photo-card label {
@@ -2394,10 +2495,14 @@ dialog {
   resize: vertical;
 }
 
+.mold-photo-card-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
 .mold-photo-card .planning-mini {
-  position: absolute;
-  top: 12px;
-  right: 12px;
+  min-width: 40px;
 }
 
 dialog::backdrop {
@@ -3162,6 +3267,11 @@ dialog::backdrop {
   }
 
   .photo-upload-button {
+    display: none !important;
+  }
+
+  .mold-photo-folder-toolbar,
+  .mold-photo-card-actions {
     display: none !important;
   }
 

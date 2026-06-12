@@ -25,6 +25,8 @@ Ele cria o banco completo do projeto, com clientes, empresas, utilizadores, enco
 
 Para bases de dados ja existentes, execute também `supabase-mold-photos-storage.sql`. Esse script cria o bucket `mold-photos` no Supabase Storage e garante o campo `orders.mold_photos` como JSONB, para que as imagens novas sejam guardadas como ficheiros e nao como texto na BD.
 
+Para evitar o aviso de segurança do Windows ao descarregar imagens, o botão `Descarregar pasta` depende de um helper local em `duomold-photo-helper.ps1`. No Windows, execute `start-duomold-photo-helper.bat` antes de usar a função. O helper grava os ficheiros localmente e remove a marca de internet dos ficheiros gravados.
+
 O ficheiro `supabase-schema.sql` cria apenas a tabela simples de sincronizacao da versao atual do HTML. Use o `supabase-full-schema.sql` para criar o projeto inteiro.
 
 ## O que inclui

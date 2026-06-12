@@ -1,5 +1,7 @@
 const storageKey = "duomold-demo-v3";
 const moldPhotoStorageBucket = "mold-photos";
+const moldPhotoRootFolderId = "__root__";
+const moldPhotoHelperBaseUrl = "http://127.0.0.1:17777";
 
 const maxVacationRequestDays = 11;
 const employeeVacationRequestDays = 11;
@@ -330,6 +332,11 @@ function normalizePhotoName(value, fallback = "Foto do molde") {
   return cleaned || fallback;
 }
 
+function normalizePhotoFolderName(value, fallback = "Sem pasta") {
+  const cleaned = String(value || "").trim().replace(/\s+/g, " ");
+  return cleaned || fallback;
+}
+
 function sanitizeFileName(value) {
   return String(value || "photo")
     .trim()
@@ -353,6 +360,10 @@ function normalizeMoldPhoto(photo, index = 0) {
   const createdAt = photo.createdAt || photo.created_at || "";
   const fileName = photo.fileName || photo.filename || "";
   const url = photo.url || (!isDataUrl(photo.src) ? photo.src : "");
+  const kind = String(photo.kind || photo.type || "").toLowerCase();
+  const normalizedKind = kind === "folder"
+    ? "folder"
+    : (kind === "zip" || kind === "archive" || String(photo.mimeType || photo.contentType || "").toLowerCase().includes("zip") || /\.zip$/i.test(fileName || photo.name || "") ? "zip" : "image");
   const normalized = {
     ...photo,
     id: photo.id || `photo-${Date.now()}-${index}`,
@@ -363,8 +374,15 @@ function normalizeMoldPhoto(photo, index = 0) {
     mimeType: photo.mimeType || photo.type || "",
     fileName,
     size: Number(photo.size || photo.fileSize || 0),
-    createdAt
+    createdAt,
+    kind: normalizedKind,
+    folderId: String(photo.folderId || photo.folder_id || "").trim()
   };
+  if (normalized.kind === "folder") {
+    normalized.name = normalizePhotoFolderName(photo.name || photo.folderName || photo.caption, `Pasta ${index + 1}`);
+    normalized.folderId = normalized.id;
+  }
+  if (!normalized.folderId && normalized.kind !== "folder") normalized.folderId = moldPhotoRootFolderId;
   if (!normalized.src && isDataUrl(photo.src)) normalized.src = photo.src;
   return normalized;
 }
@@ -372,8 +390,16 @@ function normalizeMoldPhoto(photo, index = 0) {
 function cleanMoldPhotosForSupabase(photos) {
   return (Array.isArray(photos) ? photos : [])
     .map(normalizeMoldPhoto)
-    .filter((photo) => Boolean(photoSyncSource(photo) || photo.storagePath))
     .map((photo) => {
+      if (photo.kind === "folder") {
+        return {
+          id: photo.id,
+          kind: "folder",
+          name: normalizePhotoFolderName(photo.name, "Pasta"),
+          folderId: photo.id,
+          createdAt: photo.createdAt || ""
+        };
+      }
       const cleaned = {
         id: photo.id,
         name: photo.name,
@@ -383,12 +409,14 @@ function cleanMoldPhotosForSupabase(photos) {
         mimeType: photo.mimeType || "",
         fileName: photo.fileName || "",
         size: Number(photo.size || 0),
-        createdAt: photo.createdAt || ""
+        createdAt: photo.createdAt || "",
+        kind: photo.kind === "zip" ? "zip" : "image",
+        folderId: photo.folderId || moldPhotoRootFolderId
       };
       if (cleaned.url && isDataUrl(cleaned.url)) cleaned.url = "";
       return cleaned;
     })
-    .filter((photo) => Boolean(photo.url || photo.storagePath));
+    .filter((photo) => photo.kind === "folder" || Boolean(photo.url || photo.storagePath));
 }
 
 function sanitizeStateForSupabase(sourceState) {
@@ -404,6 +432,13 @@ function photoStoragePath(orderId, photoId, fileName) {
   const folder = sanitizeFileName(orderId || "order");
   const baseName = sanitizeFileName(fileName || photoId || "photo");
   return `${folder}/${photoId}-${baseName}`;
+}
+
+function photoFolderStoragePath(orderId, folderId, fileName) {
+  const folder = sanitizeFileName(orderId || "order");
+  const group = sanitizeFileName(folderId || moldPhotoRootFolderId);
+  const baseName = sanitizeFileName(fileName || "file");
+  return `${folder}/${group}/${baseName}`;
 }
 
 function uploadPhotoBucket() {
@@ -1673,8 +1708,8 @@ function documentText() {
     week: "Week", projectProgress: "Project Progress", operations: "Operations", evolution: "Progress (%)", planned: "Planned", completed: "Completed",
     otherCharacteristics: "Other characteristics", partReference: "Part reference", injectionWeight: "Injection weight (g)", cavities: "Number of cavities",
     toolWeight: "Tool weight", dimensions: "Dimensions", lifetime: "Life time (cycles)", remarks: "Remarks", client: "Client", date: "Date",
-    moldPhotos: "Mold photos", moldPhotosSubtitle: "Product manufacturing period images", addPhoto: "Add photo", noPhotos: "No photos added.",
-    photoName: "Image name", photoNamePlaceholder: "Example: Final mold photo", photoDescription: "Description / Written option", planningTitle: "Mold Planning - MOD.54.01",
+    moldPhotos: "Mold photos", moldPhotosSubtitle: "Product manufacturing period images", addPhoto: "Add photo", addZip: "Add ZIP", newFolder: "New folder", downloadFolder: "Download folder", downloadZip: "Download ZIP", noPhotos: "No photos added.",
+    photoName: "Image name", photoNamePlaceholder: "Example: Final mold photo", photoDescription: "Description / Written option", folderName: "Folder name", folderPhotos: "Folder photos", folderRoot: "No folder", planningTitle: "Mold Planning - MOD.54.01",
     columns: "Columns: ID - Task Name - Duration - Start - Completion - Project Percentage", project: "Project", mold: "Mold No.", taskName: "Task Name",
     duration: "Duration", start: "Start", completion: "Completion", projectPercentage: "Project Percentage", actions: "Actions", observations: "Remarks",
     readonlyNote: "Client view. You can change the date to check the project percentage; editing remains available only to the Admin.", fieldsNote: "Created fields appear as columns in the worksheet."
@@ -1685,8 +1720,8 @@ function documentText() {
     week: "Semana", projectProgress: "Percentagem do Projeto", operations: "Operações", evolution: "Evolução (%)", planned: "Programado", completed: "Realizado",
     otherCharacteristics: "Outras características", partReference: "Ref. Peça", injectionWeight: "Peso Moldação (g)", cavities: "N. cavidades",
     toolWeight: "Peso Molde", dimensions: "Dimensões", lifetime: "Tempo de vida (ciclos)", remarks: "Observações", client: "Cliente", date: "Data",
-    moldPhotos: "Fotos do molde", moldPhotosSubtitle: "Imagens do período de produção do produto", addPhoto: "Adicionar foto", noPhotos: "Sem fotos adicionadas.",
-    photoName: "Nome da imagem", photoNamePlaceholder: "Ex.: Foto final do molde", photoDescription: "Descrição / Opção escrita", planningTitle: "Planeamento do Molde - MOD.54.01",
+    moldPhotos: "Fotos do molde", moldPhotosSubtitle: "Imagens do período de produção do produto", addPhoto: "Adicionar foto", addZip: "Adicionar ZIP", newFolder: "Nova pasta", downloadFolder: "Descarregar pasta", downloadZip: "Descarregar ZIP", noPhotos: "Sem fotos adicionadas.",
+    photoName: "Nome da imagem", photoNamePlaceholder: "Ex.: Foto final do molde", photoDescription: "Descrição / Opção escrita", folderName: "Nome da pasta", folderPhotos: "Fotos da pasta", folderRoot: "Sem pasta", planningTitle: "Planeamento do Molde - MOD.54.01",
     columns: "Colunas: ID - Nome da Tarefa - Duração - Início - Conclusão - Percentagem do Projeto", project: "Projeto", mold: "N. Molde", taskName: "Nome da Tarefa",
     duration: "Duração", start: "Início", completion: "Conclusão", projectPercentage: "Percentagem do Projeto", actions: "Ações", observations: "Observações",
     readonlyNote: "Visualização do cliente. Pode alterar a data para consultar a percentagem do projeto; a edição fica disponível apenas para Admin.", fieldsNote: "Os campos criados aparecem como colunas dentro da planilha."
@@ -1701,8 +1736,8 @@ function scheduleDocumentText() {
     week: "Semana", projectProgress: "Percentagem do Projeto", operations: "Operações", evolution: "Evolução (%)", planned: "Programado", completed: "Realizado",
     otherCharacteristics: "Outras características", partReference: "Ref. Peça", injectionWeight: "Peso Moldação (g)", cavities: "N. cavidades",
     toolWeight: "Peso Molde", dimensions: "Dimensões", lifetime: "Tempo de vida (ciclos)", remarks: "Observações", client: "Cliente", date: "Data",
-    moldPhotos: "Fotos do molde", moldPhotosSubtitle: "Imagens do período de produção do produto", addPhoto: "Adicionar foto", noPhotos: "Sem fotos adicionadas.",
-    photoName: "Nome da imagem", photoNamePlaceholder: "Ex.: Foto final do molde", photoDescription: "Descrição / Opção escrita"
+    moldPhotos: "Fotos do molde", moldPhotosSubtitle: "Imagens do período de produção do produto", addPhoto: "Adicionar foto", addZip: "Adicionar ZIP", newFolder: "Nova pasta", downloadFolder: "Descarregar pasta", downloadZip: "Descarregar ZIP", noPhotos: "Sem fotos adicionadas.",
+    photoName: "Nome da imagem", photoNamePlaceholder: "Ex.: Foto final do molde", photoDescription: "Descrição / Opção escrita", folderName: "Nome da pasta", folderPhotos: "Fotos da pasta", folderRoot: "Sem pasta"
   };
 }
 
@@ -2073,7 +2108,7 @@ function vacationMapFilters() {
 
 function vacationMapRecords(filters = {}) {
   return state.vacations
-    .filter((item) => item.status === "Aprovado")
+    .filter((item) => vacationMapRecordVisible(item))
     .filter((item) => item.startDate && item.endDate)
     .filter((item) => overlapsVacationYear(item))
     .filter((item) => {
@@ -2086,6 +2121,13 @@ function vacationMapRecords(filters = {}) {
       return haystack.includes(filters.query);
     })
     .sort((a, b) => String(a.startDate).localeCompare(String(b.startDate)) || userName(a.userId).localeCompare(userName(b.userId)));
+}
+
+function vacationMapRecordVisible(item) {
+  if (!item) return false;
+  if (item.status === "Rejeitado") return false;
+  if (item.origin === "Admin/RH") return true;
+  return item.status === "Aprovado";
 }
 
 function editVacationMapCell(cell) {
@@ -2826,19 +2868,23 @@ function updateVacationCalculation() {
   const vacationYear = Number(String(start.value || today()).slice(0, 4));
   const origin = form.elements.origin?.value || (role() === "Funcionario" ? "Funcionario" : "Admin/RH");
   const periodLimit = manualEntry ? adminVacationDays : vacationAllowance(form.elements.userId.value, vacationYear, "Funcionario");
-  const admissionValidation = validateVacationAdmission(form.elements.userId.value, start.value);
-  if (!admissionValidation.ok) {
-    end.value = "";
-    end.min = "";
-    end.max = "";
-    days.value = "";
-    if (hint) {
-      hint.classList.add("warning");
-      hint.textContent = admissionValidation.message;
+  if (!manualEntry) {
+    const admissionValidation = validateVacationAdmission(form.elements.userId.value, start.value);
+    if (!admissionValidation.ok) {
+      end.value = "";
+      end.min = "";
+      end.max = "";
+      days.value = "";
+      if (hint) {
+        hint.classList.add("warning");
+        hint.textContent = admissionValidation.message;
+      }
+      return;
     }
-    return;
+    if (hint) hint.classList.remove("warning");
+  } else if (hint) {
+    hint.classList.remove("warning");
   }
-  if (hint) hint.classList.remove("warning");
   end.max = addDays(start.value, periodLimit - 1);
   if (!end.value || end.value < start.value) end.value = start.value;
   if (end.value > end.max) end.value = end.max;
@@ -2864,8 +2910,10 @@ function validateVacation(data) {
   if (data.endDate > addDays(data.startDate, periodLimit - 1)) return { ok: false, message: `A data final pode ir apenas até ${periodLimit} dias corridos a partir da data inicial.` };
   if (days < 1) return { ok: false, message: "O período precisa ter pelo menos 1 dia útil." };
   if (days > periodLimit) return { ok: false, message: `Este registo de férias pode ter no máximo ${periodLimit} dias úteis a partir da data inicial.` };
-  const admissionValidation = validateVacationAdmission(data.userId, data.startDate);
-  if (!admissionValidation.ok) return admissionValidation;
+  if (!manualEntry) {
+    const admissionValidation = validateVacationAdmission(data.userId, data.startDate);
+    if (!admissionValidation.ok) return admissionValidation;
+  }
   const allowance = vacationAllowance(data.userId, vacationYear, data.origin);
   const used = vacationDaysUsedForAllowance(data.userId, editingId, vacationYear, data.origin);
   if (used + days > allowance) return { ok: false, message: `Este colaborador já tem ${used} dias usados/pendentes. O limite anual é ${allowance} dias.` };
@@ -4071,8 +4119,45 @@ function exportSchedule() {
 
 function moldPhotos(order) {
   if (!Array.isArray(order.moldPhotos)) order.moldPhotos = [];
-  order.moldPhotos = order.moldPhotos.map((photo, index) => normalizeMoldPhoto(photo, index));
+  order.moldPhotos = order.moldPhotos.map((photo, index) => normalizeMoldPhoto(photo, index)).filter(Boolean);
   return order.moldPhotos;
+}
+
+function moldPhotoFolders(order) {
+  return moldPhotos(order).filter((photo) => photo.kind === "folder");
+}
+
+function moldPhotoFiles(order) {
+  return moldPhotos(order).filter((photo) => photo.kind !== "folder");
+}
+
+function moldPhotoGroups(order, labels = documentText()) {
+  const folders = moldPhotoFolders(order);
+  const files = moldPhotoFiles(order);
+  const groups = [{
+    id: moldPhotoRootFolderId,
+    kind: "root",
+    name: labels.folderRoot || "Sem pasta",
+    createdAt: "",
+    items: files.filter((photo) => !photo.folderId || photo.folderId === moldPhotoRootFolderId)
+  }];
+  folders.forEach((folder) => {
+    groups.push({
+      ...folder,
+      items: files.filter((photo) => photo.folderId === folder.id)
+    });
+  });
+  return groups;
+}
+
+function moldPhotoFolderById(order, folderId) {
+  if (!folderId || folderId === moldPhotoRootFolderId) return null;
+  return moldPhotoFolders(order).find((folder) => folder.id === folderId) || null;
+}
+
+function moldPhotoFolderName(order, folderId, labels = documentText()) {
+  if (!folderId || folderId === moldPhotoRootFolderId) return labels.folderRoot || "Sem pasta";
+  return moldPhotoFolderById(order, folderId)?.name || labels.folderRoot || "Sem pasta";
 }
 
 function moldPhotosHtml(order, readonly, context, labels = documentText()) {
@@ -4223,6 +4308,542 @@ function openPhoto(photoId) {
   window.open(url, "_blank", "noopener,noreferrer");
 }
 
+function moldPhotos(order) {
+  if (!Array.isArray(order.moldPhotos)) order.moldPhotos = [];
+  order.moldPhotos = order.moldPhotos.map((photo, index) => normalizeMoldPhoto(photo, index)).filter(Boolean);
+  return order.moldPhotos;
+}
+
+function moldPhotoFolders(order) {
+  return moldPhotos(order).filter((photo) => photo.kind === "folder");
+}
+
+function moldPhotoFiles(order) {
+  return moldPhotos(order).filter((photo) => photo.kind !== "folder");
+}
+
+function moldPhotoGroups(order, labels = documentText()) {
+  const folders = moldPhotoFolders(order);
+  const files = moldPhotoFiles(order);
+  const groups = [{
+    id: moldPhotoRootFolderId,
+    kind: "root",
+    name: labels.folderRoot || "Sem pasta",
+    createdAt: "",
+    items: files.filter((photo) => !photo.folderId || photo.folderId === moldPhotoRootFolderId)
+  }];
+  folders.forEach((folder) => {
+    groups.push({
+      ...folder,
+      items: files.filter((photo) => photo.folderId === folder.id)
+    });
+  });
+  return groups;
+}
+
+function moldPhotoFolderById(order, folderId) {
+  if (!folderId || folderId === moldPhotoRootFolderId) return null;
+  return moldPhotoFolders(order).find((folder) => folder.id === folderId) || null;
+}
+
+function moldPhotoFolderName(order, folderId, labels = documentText()) {
+  if (!folderId || folderId === moldPhotoRootFolderId) return labels.folderRoot || "Sem pasta";
+  return moldPhotoFolderById(order, folderId)?.name || labels.folderRoot || "Sem pasta";
+}
+
+function moldPhotosHtml(order, readonly, context, labels = documentText()) {
+  const groups = moldPhotoGroups(order, labels);
+  const hasPhotos = moldPhotoFiles(order).length > 0;
+  const hasFolders = moldPhotoFolders(order).length > 0;
+  const empty = readonly ? labels.noPhotos : "Ainda sem fotos. Carregue imagens PNG/JPEG ou ficheiros ZIP.";
+  const title = context === "schedule" ? "Fotos do molde" : labels.moldPhotos;
+  const titleEn = context === "schedule" ? "Mold photos" : (labels.moldPhotosEnglish || "Mold photos");
+  return `
+    <section class="mold-photos" data-photo-context="${context}">
+      <div class="mold-photos-header">
+        <div class="mold-photos-copy">
+          <h3>${esc(title)}</h3>
+          <p>${esc(titleEn)}</p>
+          <p>${esc(labels.moldPhotosSubtitle)}</p>
+          <p>${context === "schedule" ? "Product production period images" : "Product manufacturing period images"}</p>
+        </div>
+        ${readonly ? "" : `<button class="photo-upload-button" data-photo-create-folder type="button">${esc(labels.newFolder)}</button>`}
+      </div>
+      ${hasPhotos || hasFolders || !readonly ? `<div class="mold-photo-folders">${groups.map((group) => moldPhotoFolderCard(order, group, readonly, context, labels)).join("")}</div>` : `<p class="photo-empty">${empty}</p>`}
+    </section>`;
+}
+
+function moldPhotoFolderCard(order, folder, readonly, context, labels = documentText()) {
+  const isRoot = folder.id === moldPhotoRootFolderId;
+  const folderLabel = isRoot ? (labels.folderRoot || "Sem pasta") : folder.name;
+  const cards = folder.items.length ? folder.items.map((photo) => moldPhotoCard(photo, readonly, labels)).join("") : `<p class="photo-empty">${readonly ? labels.noPhotos : "Ainda sem fotos nesta pasta."}</p>`;
+  const uploadButtons = readonly ? "" : `
+    <div class="mold-photo-folder-actions">
+      <label class="photo-upload-button">${esc(labels.addPhoto)}<input data-photo-upload="${context}" data-photo-folder="${esc(folder.id)}" data-photo-kind="image" type="file" accept="image/png,image/jpeg" hidden></label>
+      <label class="photo-upload-button photo-upload-zip">${esc(labels.addZip)}<input data-photo-upload="${context}" data-photo-folder="${esc(folder.id)}" data-photo-kind="zip" type="file" accept=".zip,application/zip,application/x-zip-compressed" hidden></label>
+    </div>`;
+  return `
+    <section class="mold-photo-folder" data-photo-folder-card="${esc(folder.id)}">
+      <div class="mold-photo-folder-header">
+        <div class="mold-photo-folder-title">
+          <span>${esc(labels.folderName || "Folder")}</span>
+          ${isRoot ? `<strong>${esc(folderLabel)}</strong>` : `<input data-photo-folder-name="${esc(folder.id)}" type="text" value="${esc(folderLabel)}" ${readonly ? "disabled" : ""}>`}
+        </div>
+        <div class="mold-photo-folder-toolbar">
+          <button class="secondary-button" data-photo-folder-download="${esc(folder.id)}" type="button">${esc(labels.downloadFolder)}</button>
+          ${readonly ? "" : uploadButtons}
+        </div>
+      </div>
+      <div class="mold-photo-grid">${cards}</div>
+    </section>`;
+}
+
+function moldPhotoCard(photo, readonly, labels = documentText()) {
+  const photoUrl = photoSource(photo);
+  const isZip = photo.kind === "zip";
+  const previewAction = isZip ? `data-photo-download="${photo.id}"` : `data-photo-open="${photo.id}"`;
+  return `
+    <article class="mold-photo-card ${isZip ? "archive" : ""}" data-photo-id="${photo.id}">
+      <button class="mold-photo-preview" ${previewAction} type="button" ${photoUrl ? "" : "disabled"}>
+        ${isZip ? `<div class="mold-photo-archive"><strong>ZIP</strong><span>${esc(photo.fileName || photo.name || "Arquivo ZIP")}</span></div>` : `<img src="${esc(photoUrl)}" alt="${esc(photo.name || "Foto do molde")}">`}
+      </button>
+      <label>${esc(labels.photoName)}
+        <input data-photo-name="${photo.id}" type="text" value="${esc(photo.name || "")}" ${readonly ? "disabled" : ""}>
+      </label>
+      <label>${esc(labels.photoDescription)}
+        <textarea data-photo-description="${photo.id}" ${readonly ? "disabled" : ""}>${esc(photo.description || "")}</textarea>
+      </label>
+      <div class="mold-photo-card-actions">
+        ${isZip ? `<button class="planning-mini" data-photo-download="${photo.id}" type="button">${esc(labels.downloadZip)}</button>` : ""}
+        ${readonly ? "" : `<button class="planning-mini red" data-photo-delete="${photo.id}" type="button">X</button>`}
+      </div>
+    </article>`;
+}
+
+function activeDocumentOrder(element) {
+  const page = element.closest(".schedule-page, .planning-page");
+  if (!page) return {};
+  const order = findOrderById(page.dataset.orderId);
+  return { page, order, readonly: page.dataset.readonly === "true", context: page.classList.contains("schedule-page") ? "schedule" : "planning" };
+}
+
+function refreshDocument(context, order, readonly) {
+  if (context === "schedule") qs("#scheduleBody").innerHTML = scheduleHtml(order, readonly);
+  if (context === "planning") qs("#planningBody").innerHTML = planningHtml(order, readonly);
+}
+
+async function handlePhotoUpload(input) {
+  const { order, readonly, context } = activeDocumentOrder(input);
+  if (!order || readonly || !input.files?.[0]) return;
+  const file = input.files[0];
+  const folderId = String(input.dataset.photoFolder || moldPhotoRootFolderId).trim() || moldPhotoRootFolderId;
+  const uploadKind = String(input.dataset.photoKind || "").toLowerCase();
+  const isZipFile = uploadKind === "zip" || file.type === "application/zip" || file.type === "application/x-zip-compressed" || /\.zip$/i.test(file.name || "");
+  const isImageFile = ["image/png", "image/jpeg"].includes(file.type);
+  if (!isZipFile && !isImageFile) {
+    alert("Use apenas imagens PNG/JPEG ou ficheiros ZIP.");
+    input.value = "";
+    return;
+  }
+  const photoId = `photo-${Date.now()}`;
+  const displayName = normalizePhotoName(file.name, file.name.replace(/\.[^.]+$/, ""));
+  const storage = uploadPhotoBucket();
+  if (!storage) {
+    alert("O upload das imagens requer ligação ao Supabase Storage.");
+    return;
+  }
+  try {
+    const storagePath = photoFolderStoragePath(order.id, folderId, `${photoId}-${file.name}`);
+    const { error: uploadError } = await storage.upload(storagePath, file, {
+      upsert: false,
+      cacheControl: "3600",
+      contentType: file.type
+    });
+    if (uploadError) throw uploadError;
+    const { data } = storage.getPublicUrl(storagePath);
+    moldPhotos(order).push({
+      id: photoId,
+      kind: isZipFile ? "zip" : "image",
+      name: displayName,
+      description: "",
+      url: data?.publicUrl || "",
+      storagePath,
+      mimeType: file.type,
+      fileName: file.name,
+      size: file.size,
+      createdAt: new Date().toISOString(),
+      folderId
+    });
+    persistStateOnly();
+    scheduleOrderClientNotification(order);
+    refreshDocument(context, order, readonly);
+  } catch (error) {
+    console.warn("Nao foi possivel guardar a imagem no Supabase Storage.", error);
+    alert("Não foi possível guardar o ficheiro no Supabase Storage. Confirme o bucket e as permissões.");
+  } finally {
+    input.value = "";
+  }
+}
+
+function savePhotoFolderName(target) {
+  const { order, readonly } = activeDocumentOrder(target);
+  if (!order || readonly) return;
+  const folder = moldPhotoFolders(order).find((item) => item.id === target.dataset.photoFolderName);
+  if (!folder) return;
+  folder.name = normalizePhotoFolderName(target.value, folder.name);
+  persistStateOnly();
+  scheduleOrderClientNotification(order);
+}
+
+function savePhotoName(target) {
+  const { order, readonly } = activeDocumentOrder(target);
+  if (!order || readonly) return;
+  const photo = moldPhotos(order).find((item) => item.id === target.dataset.photoName);
+  if (!photo) return;
+  photo.name = normalizePhotoName(target.value, photo.name);
+  persistStateOnly();
+  scheduleOrderClientNotification(order);
+}
+
+function savePhotoDescription(target) {
+  const { order, readonly } = activeDocumentOrder(target);
+  if (!order || readonly) return;
+  const photo = moldPhotos(order).find((item) => item.id === target.dataset.photoDescription);
+  if (!photo) return;
+  photo.description = target.value;
+  persistStateOnly();
+  scheduleOrderClientNotification(order);
+}
+
+async function deletePhoto(target) {
+  const { order, readonly, context } = activeDocumentOrder(target);
+  if (!order || readonly || !confirm("Remover esta foto?")) return;
+  const photos = moldPhotos(order);
+  const photo = photos.find((item) => item.id === target.dataset.photoDelete);
+  order.moldPhotos = photos.filter((item) => item.id !== target.dataset.photoDelete);
+  persistStateOnly();
+  scheduleOrderClientNotification(order);
+  refreshDocument(context, order, readonly);
+  if (photo?.storagePath) {
+    const storage = uploadPhotoBucket();
+    if (storage) {
+      try {
+        await storage.remove([photo.storagePath]);
+      } catch (error) {
+        console.warn("Nao foi possivel remover a imagem do Supabase Storage.", error);
+      }
+    }
+  }
+}
+
+async function downloadPhotoAsset(photo) {
+  const url = photoSource(photo);
+  if (!url) return;
+  const fileName = photo.fileName || `${sanitizeFileName(photo.name || "arquivo")}${photo.kind === "zip" ? ".zip" : ".jpg"}`;
+  try {
+    const response = await fetch(url);
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const blob = await response.blob();
+    downloadBlob(blob, fileName);
+  } catch (error) {
+    console.warn("Nao foi possivel descarregar o ficheiro.", error);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = fileName;
+    link.target = "_blank";
+    link.rel = "noreferrer";
+    link.click();
+  }
+}
+
+async function downloadPhotoFolder(target) {
+  const { order } = activeDocumentOrder(target);
+  if (!order) return;
+  const folderId = target.dataset.photoFolderDownload;
+  const labels = documentText();
+  const groups = moldPhotoGroups(order, labels);
+  const folder = groups.find((item) => item.id === folderId);
+  if (!folder) return;
+  const files = folder.items.filter((photo) => photoSource(photo));
+  if (!files.length) {
+    alert("Esta pasta ainda nao tem ficheiros para descarregar.");
+    return;
+  }
+  const browserOk = await downloadPhotoFolderInBrowser(order, folder, labels);
+  if (browserOk) return;
+  const helperOk = await downloadPhotoFolderWithHelper(order, folder, labels);
+  if (helperOk) return;
+  alert("Nao foi possivel descarregar a pasta. Tenta novamente ou inicia o helper local.");
+}
+
+function buildPhotoFolderDownloadPayload(order, folder, labels = documentText()) {
+  const rootName = photoFolderArchiveRootName(order, folder, labels);
+  const entries = folder.items
+    .filter((photo) => photoSource(photo))
+    .map((photo) => ({
+      folder: photo.kind === "zip" ? "zip" : "imagens",
+      name: archivePhotoFileName(photo),
+      url: photoSource(photo)
+    }));
+  return { rootName, entries };
+}
+
+async function downloadPhotoFolderWithHelper(order, folder, labels = documentText()) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 1800);
+  try {
+    const ping = await fetch(`${moldPhotoHelperBaseUrl}/ping`, {
+      method: "GET",
+      mode: "cors",
+      signal: controller.signal
+    });
+    if (!ping.ok) return false;
+    const response = await fetch(`${moldPhotoHelperBaseUrl}/download`, {
+      method: "POST",
+      mode: "cors",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(buildPhotoFolderDownloadPayload(order, folder, labels)),
+      signal: controller.signal
+    });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    return true;
+  } catch (error) {
+    return false;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+async function downloadPhotoFolderInBrowser(order, folder, labels = documentText()) {
+  const files = folder.items.filter((photo) => photoSource(photo));
+  if (!files.length) return false;
+  try {
+    return await descarregarPastaImagens(files, `${photoFolderArchiveRootName(order, folder, labels)}.tar`, photoFolderArchiveRootName(order, folder, labels));
+  } catch (error) {
+    console.warn("Nao foi possivel descarregar a pasta no navegador.", error);
+    return false;
+  }
+}
+
+async function descarregarPastaImagens(listaItens, nomeTar = "imagens_sistema.tar", rootFolderName = "imagens_sistema") {
+  if (!Array.isArray(listaItens) || !listaItens.length) return false;
+  const falhas = [];
+  let ficheirosAdicionados = 0;
+  const entradas = [];
+
+  await Promise.all(listaItens.map(async (item, index) => {
+    const url = typeof item === "string" ? item : item?.url || "";
+    if (!url) {
+      falhas.push(`URL vazia no item ${index + 1}`);
+      return;
+    }
+    try {
+      const response = await fetch(url);
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const arrayBuffer = await response.arrayBuffer();
+      const contentType = response.headers.get("content-type") || "";
+      const nomeFicheiro = arquivoNomeLimpo(item, url, index, contentType);
+      entradas.push({
+        path: `${rootFolderName}/${nomeFicheiro}`,
+        data: new Uint8Array(arrayBuffer)
+      });
+      ficheirosAdicionados += 1;
+    } catch (error) {
+      console.warn(`Nao foi possivel descarregar a imagem ${index + 1}.`, error);
+      falhas.push(url);
+    }
+  }));
+
+  if (!ficheirosAdicionados) return false;
+
+  const conteudoTar = criarTarBlob(entradas);
+  const link = document.createElement("a");
+  const objectUrl = window.URL.createObjectURL(conteudoTar);
+  link.href = objectUrl;
+  link.download = String(nomeTar || "imagens_sistema.tar").toLowerCase().endsWith(".tar") ? nomeTar : `${nomeTar}.tar`;
+  link.rel = "noreferrer";
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  setTimeout(() => window.URL.revokeObjectURL(objectUrl), 1000);
+
+  // Se os URLs vierem de outro dominio/servidor, esse servidor tem de permitir CORS
+  // para o browser conseguir fazer fetch() e ler o ficheiro antes de montar o TAR.
+  if (falhas.length) {
+    console.warn("Algumas imagens nao foram incluidas no TAR.", falhas);
+  }
+  return true;
+}
+
+function photoFolderArchiveRootName(order, folder, labels = documentText()) {
+  const moldLabel = sanitizeFileName(order.reference || order.id || "molde");
+  const folderLabel = sanitizeFileName(folder.name || labels.folderRoot || "Sem pasta");
+  return `${moldLabel}-${folderLabel}`;
+}
+
+function arquivoNomeLimpo(item, url, index = 0, contentType = "") {
+  const sourceName = typeof item === "object" && item ? (item.name || item.fileName || item.caption || "") : "";
+  const cleanSource = sanitizeFileName(stripFileExtension(sourceName));
+  const extensao = mimeToExtension(contentType) || extensionFromFileName(sourceName) || extensionFromFileName(url) || ".jpg";
+  const nomeBase = cleanSource || `foto_${indiceParaLetras(index)}`;
+  return `${nomeBase}${extensao}`;
+}
+
+function indiceParaLetras(index = 0) {
+  let value = Math.max(0, Number(index) || 0) + 1;
+  let result = "";
+  while (value > 0) {
+    value -= 1;
+    result = String.fromCharCode(97 + (value % 26)) + result;
+    value = Math.floor(value / 26);
+  }
+  return result || "a";
+}
+
+function criarTarBlob(entries = []) {
+  const blocks = [];
+  entries.forEach((entry) => {
+    const header = criarTarHeader(entry.path, entry.data?.length || 0);
+    blocks.push(header);
+    blocks.push(padTarData(entry.data || new Uint8Array(0)));
+  });
+  blocks.push(new Uint8Array(512));
+  blocks.push(new Uint8Array(512));
+  return new Blob(blocks, { type: "application/x-tar" });
+}
+
+function criarTarHeader(filePath, size) {
+  const header = new Uint8Array(512);
+  const nameBytes = encoder().encode(String(filePath || "").slice(0, 100));
+  header.set(nameBytes.slice(0, 100), 0);
+  writeTarOctal(header, 100, 8, 0o644);
+  writeTarOctal(header, 108, 8, 0);
+  writeTarOctal(header, 116, 8, 0);
+  writeTarOctal(header, 124, 12, size);
+  writeTarOctal(header, 136, 12, Math.floor(Date.now() / 1000));
+  header.fill(0x20, 148, 156);
+  header[156] = 0x30;
+  header.set(encoder().encode("ustar\0"), 257);
+  header.set(encoder().encode("00"), 263);
+  const checksum = header.reduce((total, value) => total + value, 0);
+  writeTarChecksum(header, 148, checksum);
+  return header;
+}
+
+function writeTarOctal(buffer, offset, length, value) {
+  const digits = Math.max(0, length - 1);
+  const text = Math.trunc(Number(value) || 0).toString(8).padStart(digits, "0");
+  const bytes = encoder().encode(text.slice(-digits));
+  buffer.fill(0x30, offset, offset + Math.max(0, digits - bytes.length));
+  buffer.set(bytes, offset + Math.max(0, digits - bytes.length));
+  if (length > 0) buffer[offset + length - 1] = 0x00;
+}
+
+function writeTarChecksum(buffer, offset, value) {
+  const text = Math.trunc(Number(value) || 0).toString(8).padStart(6, "0");
+  const bytes = encoder().encode(text.slice(-6));
+  buffer.fill(0x30, offset, offset + Math.max(0, 6 - bytes.length));
+  buffer.set(bytes, offset + Math.max(0, 6 - bytes.length));
+  buffer[offset + 6] = 0x00;
+  buffer[offset + 7] = 0x20;
+}
+
+function padTarData(data) {
+  const bytes = data instanceof Uint8Array ? data : new Uint8Array(data || 0);
+  const remainder = bytes.length % 512;
+  if (!remainder) return bytes;
+  const padding = new Uint8Array(512 - remainder);
+  const combined = new Uint8Array(bytes.length + padding.length);
+  combined.set(bytes, 0);
+  combined.set(padding, bytes.length);
+  return combined;
+}
+
+function encoder() {
+  return new TextEncoder();
+}
+
+function archivePhotoFileName(photo) {
+  const baseName = sanitizeFileName(stripFileExtension(photo?.name || photo?.fileName || photo?.caption || photo?.id || "foto"));
+  const extension = photo?.kind === "zip"
+    ? ".zip"
+    : mimeToExtension(photo?.mimeType) || extensionFromFileName(photo?.fileName) || extensionFromFileName(photo?.name) || ".jpg";
+  return `${baseName}${extension}`;
+}
+
+function mimeToExtension(mimeType) {
+  const value = String(mimeType || "").toLowerCase();
+  if (value === "image/png") return ".png";
+  if (value === "image/jpeg") return ".jpg";
+  if (value === "image/webp") return ".webp";
+  if (value === "application/zip" || value === "application/x-zip-compressed") return ".zip";
+  return "";
+}
+
+function extensionFromFileName(fileName) {
+  const match = String(fileName || "").match(/(\.[^.]+)$/);
+  return match ? match[1].toLowerCase() : "";
+}
+
+function stripFileExtension(fileName) {
+  return String(fileName || "").replace(/\.[^.]+$/, "");
+}
+
+function downloadBlob(blob, fileName) {
+  const link = document.createElement("a");
+  const objectUrl = URL.createObjectURL(blob);
+  link.href = objectUrl;
+  link.download = fileName;
+  link.rel = "noreferrer";
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  setTimeout(() => URL.revokeObjectURL(objectUrl), 1000);
+}
+
+function openPhoto(photoId) {
+  const page = qs(".schedule-page, .planning-page");
+  if (!page) return;
+  const order = findOrderById(page.dataset.orderId);
+  if (!order) return;
+  const photo = moldPhotos(order).find((item) => item.id === photoId);
+  if (!photo) return;
+  if (photo.kind === "zip") {
+    void downloadPhotoAsset(photo);
+    return;
+  }
+  const url = photoSource(photo);
+  if (!url) return;
+  window.open(url, "_blank", "noopener,noreferrer");
+}
+
+function downloadPhoto(target) {
+  const page = qs(".schedule-page, .planning-page");
+  if (!page) return;
+  const order = findOrderById(page.dataset.orderId);
+  if (!order) return;
+  const photo = moldPhotos(order).find((item) => item.id === target.dataset.photoDownload);
+  if (photo) void downloadPhotoAsset(photo);
+}
+
+function createPhotoFolder(target) {
+  const { order, readonly, context } = activeDocumentOrder(target);
+  if (!order || readonly) return;
+  const folderName = normalizePhotoFolderName(prompt("Nome da nova pasta"), "");
+  if (!folderName) return;
+  moldPhotos(order).push({
+    id: `folder-${Date.now()}`,
+    kind: "folder",
+    name: folderName,
+    description: "",
+    folderId: "",
+    createdAt: new Date().toISOString()
+  });
+  persistStateOnly();
+  scheduleOrderClientNotification(order);
+  refreshDocument(context, order, readonly);
+}
+
 function today() {
   return new Date().toISOString().slice(0, 10);
 }
@@ -4278,8 +4899,14 @@ function planningCurrentDate(order, previewDate = "") {
   return previewDate || order?.planning?.data || today();
 }
 
+function planningClientDateLimit(valueText = "") {
+  const value = String(valueText || "").trim();
+  if (!value) return "";
+  return value > today() ? today() : value;
+}
+
 function planningHtml(order, readonly) {
-  const previewDate = readonly ? currentPlanningPreviewDate() : "";
+  const previewDate = readonly ? planningClientDateLimit(currentPlanningPreviewDate() || order?.planning?.data || "") : "";
   const data = planningFor(order, previewDate);
   const labels = documentText();
   const disabled = readonly ? "disabled" : "";
@@ -4287,7 +4914,9 @@ function planningHtml(order, readonly) {
   const field = (key) => esc(data[key] ?? "");
   const topFieldAttrs = (key, type = "text") => {
     if (!readonly) return "";
-    return key === "data" && type === "date" ? 'data-planning-preview="true"' : "disabled";
+    return key === "data" && type === "date"
+      ? `data-planning-preview="true" max="${today()}"`
+      : "disabled";
   };
   const extraHeaders = data.campos.map((campo, index) => `
     <th class="planning-extra">${esc(campo.nome)}
@@ -4309,7 +4938,7 @@ function planningHtml(order, readonly) {
           <label>${esc(labels.project)}<input data-planning-field="projeto" value="${field("projeto")}" ${topFieldAttrs("projeto")}></label>
           <label>${esc(labels.client)}<input data-planning-field="cliente" value="${field("cliente")}" ${topFieldAttrs("cliente")}></label>
           <label>${esc(labels.mold)}<input data-planning-field="molde" value="${field("molde")}" ${topFieldAttrs("molde")}></label>
-          <label>${esc(labels.date)}<input data-planning-field="data" type="date" value="${esc(previewDate || data.data || "")}" ${topFieldAttrs("data", "date")}></label>
+          <label>${esc(labels.date)}<input data-planning-field="data" type="date" value="${esc(readonly ? planningClientDateLimit(previewDate || data.data || "") : (data.data || ""))}" ${topFieldAttrs("data", "date")}></label>
         </div>
         <p class="planning-note">${esc(readonly ? labels.readonlyNote : labels.fieldsNote)}</p>
       </section>
@@ -4369,13 +4998,15 @@ function activePlanning() {
   const page = qs(".planning-page");
   if (!page) return {};
   const order = findOrderById(page.dataset.orderId);
-  const previewDate = page.dataset.previewDate || "";
+  const previewDate = page.dataset.readonly === "true"
+    ? planningClientDateLimit(page.dataset.previewDate || order?.planning?.data || "")
+    : (page.dataset.previewDate || "");
   return { page, order, data: order ? planningFor(order, previewDate) : null, readonly: page.dataset.readonly === "true", previewDate };
 }
 
 function currentPlanningPreviewDate() {
   const page = qs(".planning-page");
-  return page?.dataset.previewDate || "";
+  return planningClientDateLimit(page?.dataset.previewDate || "");
 }
 
 function savePlanningField(target) {
@@ -4385,7 +5016,8 @@ function savePlanningField(target) {
   if (topField) {
     if (readonly) {
       if (topField === "data" && target.dataset.planningPreview === "true") {
-        page.dataset.previewDate = target.value || "";
+        page.dataset.previewDate = planningClientDateLimit(target.value || "");
+        target.value = page.dataset.previewDate;
         qs("#planningBody").innerHTML = planningHtml(order, true);
       }
       return;
@@ -4679,8 +5311,20 @@ document.addEventListener("click", (event) => {
     fn(mode, target.closest(`[data-${key}]`).dataset[toDatasetKey(key)]);
   }
   if (target.closest("[data-new-client-order]")) openDialog("order", null, { clientId: target.closest("[data-new-client-order]").dataset.newClientOrder });
+  if (target.closest("[data-photo-create-folder]")) {
+    createPhotoFolder(target.closest("[data-photo-create-folder]"));
+    return;
+  }
+  if (target.closest("[data-photo-folder-download]")) {
+    void downloadPhotoFolder(target.closest("[data-photo-folder-download]"));
+    return;
+  }
   if (target.closest("[data-photo-open]")) {
     openPhoto(target.closest("[data-photo-open]").dataset.photoOpen);
+    return;
+  }
+  if (target.closest("[data-photo-download]")) {
+    downloadPhoto(target.closest("[data-photo-download]"));
     return;
   }
   if (target.closest("[data-planning-delete-row]")) {
@@ -4713,6 +5357,7 @@ document.addEventListener("click", (event) => {
 document.addEventListener("input", (event) => {
   if (event.target.closest("#scheduleDialog")) saveSchedule();
   if (event.target.closest("#planningDialog")) savePlanningField(event.target);
+  if (event.target.matches("[data-photo-folder-name]")) savePhotoFolderName(event.target);
   if (event.target.matches("[data-photo-name]")) savePhotoName(event.target);
   if (event.target.matches("[data-photo-description]")) savePhotoDescription(event.target);
 });
