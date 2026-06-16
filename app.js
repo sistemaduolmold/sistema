@@ -138,7 +138,7 @@ const vacationLegendItems = [
   { id: "carnival", code: "C", label: "Carnaval", className: "carnival", color: "#ccc0d9" },
   { id: "previous-year", code: "A", label: "Férias do ano anterior / ano de admissão", className: "previous-year", color: "#e36d09" },
   { id: "half-day", code: "M", label: "Meio-dia de férias", className: "half-day", color: "#92cddc" },
-  { id: "bank-hours", code: "BG", label: "Banco de horas", className: "code-bg", color: "#92cddc" },
+  { id: "bank-hours", code: "BH", label: "Banco de horas", className: "code-bh", color: "#92cddc" },
   { id: "compensatory", code: "DC", label: "Descanso compensatório", className: "code-dc", color: "#e36d09" }
 ];
 const orderStatusOptions = [
@@ -301,7 +301,7 @@ const forms = {
   vacation: [
     ["userId", "Colaborador", "user", true],
     ["origin", "Origem", "select:Admin/RH|Funcionario"],
-    ["mapCode", "Código do mapa", "select:F|BG|DC"],
+    ["mapCode", "Código do mapa", "select:F|BH|DC|A"],
     ["startDate", "Data inicial", "date", true],
     ["endDate", "Data final", "date", true],
     ["days", "Dias úteis calculados", "number"],
@@ -1131,7 +1131,7 @@ function mapVacationFromSupabase(row) {
     endDate: row.end_date || "",
     days: String(row.days ?? 0),
     origin: row.origin || "Funcionario",
-    mapCode: row.map_code || row.mapCode || deriveVacationCode(row),
+    mapCode: normalizeVacationCode(row.map_code || row.mapCode || deriveVacationCode(row)),
     status: row.status || "Pendente",
     notes: row.notes || "",
     decidedBy: row.decided_by || userName(row.approved_by) || "",
@@ -1250,7 +1250,7 @@ function vacationToSupabase(vacation) {
     end_date: vacation.endDate || null,
     days: Number(vacation.days || 0),
     origin: vacation.origin || "Funcionario",
-    map_code: vacationCode(vacation),
+    map_code: normalizeVacationCode(vacationCode(vacation)),
     status: vacation.status || "Pendente",
     notes: vacation.notes || "",
     decided_by: vacation.decidedBy || "",
@@ -1792,7 +1792,7 @@ function renderVacations() {
       <td>${esc(item.days)}</td>
       <td>${esc(item.origin)}</td>
       <td><span class="status ${cls(item.status)}">${esc(item.status)}</span></td>
-      <td><div class="row-actions">${role() !== "Funcionario" ? `<button class="row-action" data-edit-vacation="${item.id}">Editar</button><button class="row-action approve" data-approve-vacation="${item.id}">Aprovar</button><button class="row-action delete" data-reject-vacation="${item.id}">Rejeitar</button>` : ""}</div></td>
+      <td><div class="row-actions">${role() !== "Funcionario" ? `<button class="row-action" data-edit-vacation="${item.id}">Editar</button><button class="row-action approve" data-approve-vacation="${item.id}">Aprovar</button><button class="row-action delete" data-reject-vacation="${item.id}">Rejeitar</button><button class="row-action delete" data-delete-vacation="${item.id}">Eliminar</button>` : ""}</div></td>
     </tr>`);
   renderVacationMap();
 }
@@ -1878,6 +1878,15 @@ function vacationMapLegendItems() {
 }
 
 function normalizeVacationLegendItems(items) {
+  const bankHours = items.find((item) => item.id === "bank-hours" || normalizeVacationCode(item.code) === "BH");
+  if (bankHours) {
+    Object.assign(bankHours, {
+      code: "BH",
+      label: bankHours.label || "Banco de horas",
+      className: "code-bh",
+      color: bankHours.color || "#92cddc"
+    });
+  }
   const weekend = items.find((item) => item.id === "weekend");
   if (weekend) {
     Object.assign(weekend, {
@@ -1921,17 +1930,22 @@ function buildVacationMonthHtml(monthName, monthIndex, records) {
   `;
 }
 
-function vacationMapPeople(filters = vacationMapFilters(), records = []) {
-  const recordUserIds = new Set(records.map((item) => item.userId));
+function vacationMapPeople(filters = vacationMapFilters(), records = [], extraUserIds = new Set(), extraRecords = []) {
+  const recordUserIds = new Set([
+    ...records.map((item) => item.userId),
+    ...extraUserIds
+  ]);
   return state.users
     .filter((user) => user.status !== "Inativo")
-    .filter((user) => user.role === "Funcionario" || recordUserIds.has(user.id))
+    .filter((user) => recordUserIds.has(user.id))
     .filter((user) => !filters.team || (user.department || "Sem equipa") === filters.team)
     .filter((user) => {
       if (!filters.query) return true;
       const userText = [user.name, user.department, user.position, user.employeeNumber, user.role].join(" ").toLowerCase();
-      const recordText = records
-        .filter((item) => item.userId === user.id)
+      const recordText = [
+        ...records.filter((item) => item.userId === user.id),
+        ...extraRecords.filter((item) => item.userId === user.id)
+      ]
         .map((item) => [item.origin, item.status, item.notes, vacationCode(item)].join(" "))
         .join(" ")
         .toLowerCase();
@@ -1941,25 +1955,32 @@ function vacationMapPeople(filters = vacationMapFilters(), records = []) {
 }
 
 function vacationMapCellInfo(userId, iso, monthRecords) {
-  const override = vacationMapOverride(userId, iso);
-  if (override) {
-    return {
-      value: override.code,
-      className: vacationMapClassForCode(override.code),
-      color: override.color || "",
-      title: `${userName(userId)} - ${date(iso)} - Manual: ${override.code}`
-    };
-  }
-  const nationalHoliday = portugalNationalHolidayName(iso);
-  if (nationalHoliday) {
-    return {
-      value: "N",
-      className: "national-holiday",
-      color: vacationMapLegendItems().find((item) => item.id === "national")?.color || "#b8cce4",
-      title: `${userName(userId)} - ${date(iso)} - ${nationalHoliday}`
-    };
-  }
   const item = monthRecords.find((record) => record.userId === userId && iso >= record.startDate && iso <= record.endDate);
+  const specialDay = vacationMapSpecialDayInfo(iso);
+  const override = vacationMapOverride(userId, iso);
+  if (specialDay) {
+    const overlayCode = normalizeVacationCode(override?.code || item?.mapCode || item?.code || (item ? vacationCode(item, iso) : ""));
+    const displayCode = overlayCode || specialDay.value;
+    return {
+      value: displayCode,
+      className: `${specialDay.className}${overlayCode ? ` ${vacationMapClassForCode(overlayCode)}` : ""}`,
+      color: specialDay.color,
+      title: override
+        ? `${userName(userId)} - ${date(iso)} - ${specialDay.label} / Manual: ${displayCode}`
+        : item
+          ? `${userName(userId)} - ${date(iso)} - ${specialDay.label} / ${vacationCodeLabel(vacationCode(item, iso))}`
+          : `${userName(userId)} - ${date(iso)} - ${specialDay.label}`
+    };
+  }
+  if (override) {
+    const overrideCode = normalizeVacationCode(override.code || "");
+    return {
+      value: overrideCode,
+      className: vacationMapClassForCode(overrideCode),
+      color: override.color || "",
+      title: `${userName(userId)} - ${date(iso)} - Manual: ${overrideCode}`
+    };
+  }
   if (item) {
     const code = vacationCode(item, iso);
     return {
@@ -1978,6 +1999,27 @@ function vacationMapCellInfo(userId, iso, monthRecords) {
     };
   }
   return { value: "", className: "", title: `${userName(userId)} - ${date(iso)}` };
+}
+
+function vacationMapSpecialDayInfo(iso) {
+  const nationalHoliday = portugalNationalHolidayName(iso);
+  if (nationalHoliday) {
+    return {
+      value: "N",
+      className: "national-holiday",
+      color: vacationMapLegendItems().find((item) => item.id === "national")?.color || "#b8cce4",
+      label: nationalHoliday
+    };
+  }
+  if (isWeekend(iso)) {
+    return {
+      value: "N",
+      className: "weekend",
+      color: vacationMapLegendItems().find((item) => item.id === "weekend")?.color || "#66ff00",
+      label: "Fim-de-semana"
+    };
+  }
+  return null;
 }
 
 function portugalNationalHolidayName(iso) {
@@ -2027,7 +2069,8 @@ function easterSunday(year) {
 
 function vacationMapClassForCode(code) {
   const valueText = String(code || "").toUpperCase();
-  if (["F", "BG", "DC"].includes(valueText)) return `code-${valueText.toLowerCase()}`;
+  if (valueText === "BG") return "code-bh";
+  if (["F", "BH", "DC"].includes(valueText)) return `code-${valueText.toLowerCase()}`;
   if (valueText === "N") return "national-holiday";
   if (valueText === "X") return "blocked-day";
   if (valueText === "C") return "carnival";
@@ -2046,7 +2089,9 @@ function buildVacationExcelMonthTable(monthName, monthIndex, records, options = 
   const monthStart = isoDate(vacationMapYear, monthIndex + 1, 1);
   const monthEnd = isoDate(vacationMapYear, monthIndex + 1, daysInMonth);
   const monthRecords = records.filter((item) => String(item.startDate).localeCompare(monthEnd) <= 0 && String(item.endDate).localeCompare(monthStart) >= 0);
-  const people = vacationMapPeople(filters, records);
+  const monthOverrides = state.vacationMapOverrides.filter((item) => item.date >= monthStart && item.date <= monthEnd);
+  const monthOverrideUserIds = new Set(monthOverrides.map((item) => item.userId));
+  const people = vacationMapPeople(filters, monthRecords, monthOverrideUserIds, monthOverrides);
   const weekdays = Array.from({ length: daysInMonth }, (_, index) => {
     const iso = isoDate(vacationMapYear, monthIndex + 1, index + 1);
     return `<th class="excel-weekday ${isWeekend(iso) ? "weekend" : ""}">${esc(vacationWeekdayLabel(iso))}</th>`;
@@ -2257,16 +2302,16 @@ function vacationTeamName(userId) {
 
 function vacationCode(item, iso = "") {
   if (vacationIsPreviousYearEntry(item, iso)) return "A";
-  return deriveVacationCode(item);
+  return normalizeVacationCode(deriveVacationCode(item));
 }
 
 function vacationCodeLabel(code) {
   return {
     F: "F - Férias",
     A: "A - Férias do ano anterior / ano de admissão",
-    BG: "BG - Banco de Horas",
+    BH: "BH - Banco de Horas",
     DC: "DC - Descanso Compensatório"
-  }[code] || code;
+  }[normalizeVacationCode(code)] || normalizeVacationCode(code);
 }
 
 function vacationIsPreviousYearEntry(item, iso = "") {
@@ -2284,7 +2329,7 @@ function vacationMapSummary(records) {
   return {
     total: records.length,
     f: records.filter((item) => vacationCode(item) === "F").length,
-    bg: records.filter((item) => vacationCode(item) === "BG").length,
+    bh: records.filter((item) => vacationCode(item) === "BH").length,
     dc: records.filter((item) => vacationCode(item) === "DC").length,
     days: records.reduce((total, item) => total + Number(item.days || 0), 0)
   };
@@ -2361,8 +2406,14 @@ function dialogSubtitle(mode) {
 }
 
 function fieldHtml([name, labelText, type, required], record) {
-  const valueText = name === "mapCode" && dialogMode === "vacation" && !record[name] ? "F" : record[name] || "";
+  const valueText = name === "mapCode" && dialogMode === "vacation"
+    ? normalizeVacationCode(record[name] || "F")
+    : record[name] || "";
   const req = required ? "required" : "";
+  const vacationCodeHelp = "F - Férias | BH - Banco de horas | DC - Descanso compensatório | A - Férias do ano anterior / Meio dias de férias";
+  const vacationCodeHint = name === "mapCode" && dialogMode === "vacation"
+    ? `<small class="field-help-text">${esc(vacationCodeHelp)}</small>`
+    : "";
   if (type === "textarea") return `<label class="field full"><span>${labelText}</span><textarea name="${name}" ${req}>${esc(valueText)}</textarea></label>`;
   if (type === "company") return selectField(name, labelText, state.companies.map((item) => [item.id, item.name]), valueText, req);
   if (type === "client") return selectField(name, labelText, state.clients.map((item) => [item.id, item.name]), valueText, req);
@@ -2377,7 +2428,15 @@ function fieldHtml([name, labelText, type, required], record) {
     return `<label class="field"><span>${labelText}</span><select name="${name}" disabled><option value="Pendente" selected>Pendente</option></select><input type="hidden" name="${name}" value="Pendente"></label>`;
   }
   if (type === "attachments" && dialogMode === "absence") return absenceAttachmentsField();
-  if (type.startsWith("select:")) return selectField(name, labelText, type.replace("select:", "").split("|").map((item) => [item, item]), valueText, req);
+  if (type.startsWith("select:")) {
+    const options = type.replace("select:", "").split("|").map((item) => {
+      return [item, item];
+    });
+    if (name === "mapCode" && dialogMode === "vacation") {
+      return `<label class="field"><span>${labelText}</span><select name="${name}" ${req}>${options.map(([valueOption, labelOption]) => `<option value="${esc(valueOption)}" ${valueText === valueOption ? "selected" : ""}>${esc(labelOption)}</option>`).join("")}</select>${vacationCodeHint}</label>`;
+    }
+    return selectField(name, labelText, options, valueText, req);
+  }
   return `<label class="field"><span>${labelText}</span><input name="${name}" type="${type}" value="${esc(valueText)}" ${req}></label>`;
 }
 
@@ -2446,8 +2505,8 @@ function toggleOrderHistoryStatus(orderId, historyId, delivered) {
   refreshOrderHistoryList(orderId);
 }
 
-function selectField(name, labelText, options, valueText, req) {
-  return `<label class="field"><span>${labelText}</span><select name="${name}" ${req}>${options.map(([valueOption, labelOption]) => `<option value="${esc(valueOption)}" ${valueText === valueOption ? "selected" : ""}>${esc(labelOption)}</option>`).join("")}</select></label>`;
+function selectField(name, labelText, options, valueText, req, labelSuffix = "") {
+  return `<label class="field"><span>${labelText}${labelSuffix}</span><select name="${name}" ${req}>${options.map(([valueOption, labelOption]) => `<option value="${esc(valueOption)}" ${valueText === valueOption ? "selected" : ""}>${esc(labelOption)}</option>`).join("")}</select></label>`;
 }
 
 function absenceAttachmentsField() {
@@ -2921,13 +2980,20 @@ function validateVacation(data) {
 }
 
 function deriveVacationCode(data = {}) {
-  const candidate = String(data.mapCode || data.code || "").toUpperCase().trim();
-  if (["F", "BG", "DC"].includes(candidate)) return candidate;
+  const candidate = normalizeVacationCode(data.mapCode || data.code || "");
+  if (["F", "BH", "DC"].includes(candidate)) return candidate;
   if (String(data.origin || "").toLowerCase().includes("compensa")) return "DC";
-  if (String(data.origin || "").toLowerCase().includes("banco")) return "BG";
+  if (String(data.origin || "").toLowerCase().includes("banco")) return "BH";
   if (String(data.notes || "").toLowerCase().includes("compensa")) return "DC";
-  if (String(data.notes || "").toLowerCase().includes("banco")) return "BG";
+  if (String(data.notes || "").toLowerCase().includes("banco")) return "BH";
   return "F";
+}
+
+function normalizeVacationCode(code = "") {
+  const valueText = String(code || "").toUpperCase().trim();
+  if (valueText === "BG") return "BH";
+  if (["F", "BH", "DC", "A", "M", "N", "X", "C"].includes(valueText)) return valueText;
+  return valueText;
 }
 
 function vacationRequestExtraDays(userId) {
@@ -3253,6 +3319,7 @@ function vacationMapCellColor(info = {}) {
   if (info.color) return info.color;
   return {
     "code-f": "#00b0f0",
+    "code-bh": "#92cddc",
     "code-bg": "#92cddc",
     "code-dc": "#e36d09",
     "national-holiday": "#b8cce4",
@@ -3435,7 +3502,7 @@ function buildVacationMapExcelHtml(records) {
         th, td { border: 1px solid #333; padding: 6px 8px; font-size: 11px; }
         th { background: #f1f1f1; }
         .code-f { background: #00b0f0; }
-        .code-bg { background: #dbeafe; }
+        .code-bh, .code-bg { background: #dbeafe; }
         .code-dc { background: #dcfce7; }
         .weekend { background: #66ff00; font-weight: 700; text-align: center; }
         .vacation-excel-legend { display: flex; align-items: stretch; margin-bottom: 12px; border: 0; font-family: Calibri, Arial, sans-serif; font-size: 12px; }
@@ -3467,6 +3534,7 @@ function buildVacationMapExcelHtml(records) {
         .vacation-excel-month .excel-day-head, .vacation-excel-month .excel-day-cell { background: #ffffff; font-size: 12px; font-weight: 700; }
         .vacation-excel-month .excel-person-cell { color: #c00000; background: #ffffff; text-align: center; font-weight: 400; }
         .vacation-excel-month .excel-day-cell.code-f { background: #00b0f0; }
+        .vacation-excel-month .excel-day-cell.code-bh,
         .vacation-excel-month .excel-day-cell.code-bg { background: #92cddc; }
         .vacation-excel-month .excel-day-cell.code-dc { background: #e36d09; }
         .vacation-excel-month .excel-day-cell.national-holiday { background: #b8cce4; }
@@ -3787,6 +3855,7 @@ function buildVacationMapPrintableHtml(records) {
           font-weight: 400;
         }
         .vacation-excel-month .excel-day-cell.code-f { background: #00b0f0; }
+        .vacation-excel-month .excel-day-cell.code-bh,
         .vacation-excel-month .excel-day-cell.code-bg { background: #92cddc; }
         .vacation-excel-month .excel-day-cell.code-dc { background: #e36d09; }
         .vacation-excel-month .excel-day-cell.national-holiday { background: #b8cce4; }
@@ -5304,7 +5373,7 @@ document.addEventListener("click", (event) => {
     ["edit-company", "company", openDialog], ["delete-company", "company", deleteRecord],
     ["edit-order", "order", openDialog], ["delete-order", "order", deleteRecord],
     ["edit-user", "user", openDialog], ["delete-user", "user", deleteRecord],
-    ["edit-vacation", "vacation", openDialog], ["edit-absence", "absence", openDialog]
+    ["edit-vacation", "vacation", openDialog], ["delete-vacation", "vacation", deleteRecord], ["edit-absence", "absence", openDialog]
   ].find(([key]) => target.closest(`[data-${key}]`));
   if (action) {
     const [key, mode, fn] = action;
