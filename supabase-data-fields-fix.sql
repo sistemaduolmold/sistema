@@ -108,8 +108,16 @@ alter table public.vacations
 alter table public.absences
   add column if not exists type text not null default 'Justificada',
   add column if not exists compensate_vacation boolean not null default false,
+  add column if not exists compensation_mode text not null default 'Descontar do salário',
   add column if not exists decided_by text not null default '',
   add column if not exists attachments jsonb not null default '[]'::jsonb;
+
+update public.absences
+set compensation_mode = case
+  when compensate_vacation then 'Compensar com 1 dia de férias'
+  else 'Descontar do salário'
+end
+where compensation_mode is null or compensation_mode = '';
 
 alter table public.absences
   drop constraint if exists absences_status_check,

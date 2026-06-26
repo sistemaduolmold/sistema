@@ -22,6 +22,7 @@ const demoData = {
   absences: [],
   notifications: [],
   vacationMapOverrides: [],
+  vacationMapYear: new Date().getFullYear(),
   vacationMapDocument: {
     company: "Duomold - Fábrica de Moldes, Lda.",
     address: "Rua do Sobral, 585 - Pavilhão 1 - 3720-602 Oliveira de Azeméis",
@@ -166,9 +167,13 @@ let isLoggedIn = false;
 let adminSessionAccount = "";
 let supabaseClient = null;
 let supabaseSaveTimer = null;
+let supabaseRemoteRefreshTimer = null;
+let supabasePollingTimer = null;
+let supabaseRealtimeChannel = null;
 const orderNotificationTimers = new Map();
 let applyingRemoteState = false;
 let savingSupabase = false;
+let refreshingSupabase = false;
 
 const views = {
   dashboard: qs("#dashboardView"),
@@ -312,7 +317,7 @@ const forms = {
     ["userId", "Colaborador", "user", true],
     ["date", "Data", "date", true],
     ["type", "Tipo", "select:Justificada|Injustificada|Baixa|Outro"],
-    ["compensateVacation", "Compensar com 1 dia de férias", "select:Não|Sim"],
+    ["compensateVacation", "Compensar como", "select:Compensar com 1 dia de férias|Compensar com banco de horas|Descontar do salário"],
     ["status", "Estado", "select:Pendente|Aprovado|Rejeitado"],
     ["reason", "Motivo", "textarea"],
     ["attachments", "Anexos", "attachments"]
@@ -471,6 +476,8 @@ function mergeState(saved) {
   }
   if (!Array.isArray(merged.notifications)) merged.notifications = [];
   if (!Array.isArray(merged.vacationMapOverrides)) merged.vacationMapOverrides = [];
+  vacationMapYear = Number(merged.vacationMapYear || new Date().getFullYear()) || new Date().getFullYear();
+  merged.vacationMapYear = vacationMapYear;
   merged.vacationMapDocument = {
     ...structuredClone(demoData.vacationMapDocument),
     ...(merged.vacationMapDocument || {}),
@@ -556,14 +563,18 @@ function isAutomaticOrderHistoryDetail(detail) {
 }
 
 function saveState() {
-  localStorage.setItem(storageKey, JSON.stringify(state));
+  persistLocalState();
   scheduleSupabaseSave();
   render();
 }
 
 function persistStateOnly() {
-  localStorage.setItem(storageKey, JSON.stringify(state));
+  persistLocalState();
   scheduleSupabaseSave();
+}
+
+function persistLocalState() {
+  localStorage.setItem(storageKey, JSON.stringify(state));
 }
 
 function initSupabase() {
@@ -573,9 +584,11 @@ function initSupabase() {
   supabaseClient = window.supabase.createClient(config.url, config.anonKey);
 }
 
-async function loadStateFromSupabase() {
+async function loadStateFromSupabase({ persistRemoteSnapshot = true } = {}) {
   if (!supabaseClient) return;
+  if (refreshingSupabase) return;
   const config = window.DUOMOLD_SUPABASE;
+  refreshingSupabase = true;
   try {
     const { data, error } = await supabaseClient
       .from(config.stateTable)
@@ -594,11 +607,13 @@ async function loadStateFromSupabase() {
     applyingRemoteState = true;
     state = mergeState(data.data);
     applyingRemoteState = false;
-    await loadCoreDataFromSupabase();
+    await loadCoreDataFromSupabase({ persistRemoteSnapshot });
     render();
   } catch (error) {
     applyingRemoteState = false;
     console.warn("Supabase indisponivel. O sistema continua em modo local.", error);
+  } finally {
+    refreshingSupabase = false;
   }
 }
 
@@ -993,7 +1008,7 @@ function upsertById(list, record) {
   else list.push(record);
 }
 
-async function loadCoreDataFromSupabase() {
+async function loadCoreDataFromSupabase({ persistRemoteSnapshot = true } = {}) {
   if (!supabaseClient) return;
   try {
     const [companies, clients, users, orders, vacations, absences, notifications] = await Promise.all([
@@ -1030,10 +1045,44 @@ async function loadCoreDataFromSupabase() {
 
     if (notifications.error) console.warn("Nao foi possivel carregar notifications.", notifications.error);
     else state.notifications = mergeSupabaseCollection(state.notifications, notifications.data.map(mapNotificationFromSupabase));
-    persistStateOnly();
+    if (persistRemoteSnapshot) persistStateOnly();
+    else persistLocalState();
   } catch (error) {
     console.warn("Nao foi possivel carregar tabelas principais do Supabase.", error);
   }
+}
+
+function setupSupabaseRealtimeSync() {
+  if (!supabaseClient || supabaseRealtimeChannel) return;
+  const config = window.DUOMOLD_SUPABASE;
+  if (!config?.stateTable || !config?.stateId) return;
+  supabaseRealtimeChannel = supabaseClient.channel(`duomold-state-sync-${config.stateId}`);
+  const queueRemoteRefresh = () => scheduleSupabaseRemoteRefresh();
+  supabaseRealtimeChannel
+    .on("postgres_changes", { event: "*", schema: "public", table: config.stateTable, filter: `id=eq.${config.stateId}` }, queueRemoteRefresh)
+    .on("postgres_changes", { event: "*", schema: "public", table: "vacations" }, queueRemoteRefresh)
+    .on("postgres_changes", { event: "*", schema: "public", table: "absences" }, queueRemoteRefresh)
+    .subscribe((status) => {
+      if (status === "CHANNEL_ERROR" || status === "TIMED_OUT") {
+        console.warn("Nao foi possivel ativar a sincronizacao em tempo real do mapa de ferias.");
+      }
+    });
+}
+
+function scheduleSupabaseRemoteRefresh() {
+  if (!supabaseClient) return;
+  clearTimeout(supabaseRemoteRefreshTimer);
+  supabaseRemoteRefreshTimer = setTimeout(async () => {
+    if (document.hidden) return;
+    await loadStateFromSupabase({ persistRemoteSnapshot: false });
+  }, 500);
+}
+
+function startSupabasePolling() {
+  if (!supabaseClient || supabasePollingTimer) return;
+  supabasePollingTimer = setInterval(() => {
+    if (!document.hidden) void loadStateFromSupabase({ persistRemoteSnapshot: false });
+  }, 30000);
 }
 
 function mergeSupabaseCollection(existingRows = [], supabaseRows = []) {
@@ -1147,7 +1196,7 @@ function mapAbsenceFromSupabase(row) {
     userId: row.user_id || "",
     date: row.date || "",
     type: row.type || "Justificada",
-    compensateVacation: row.compensate_vacation ? "Sim" : "Não",
+    compensateVacation: absenceCompensationMode(row.compensation_mode || (row.compensate_vacation ? "Compensar com 1 dia de férias" : "Descontar do salário")),
     status: row.status || "Pendente",
     reason: row.reason || "",
     decidedBy: row.decided_by || "",
@@ -1266,7 +1315,8 @@ function absenceToSupabase(absence) {
     user_id: absence.userId || "",
     date: absence.date || null,
     type: absence.type || "Justificada",
-    compensate_vacation: absence.compensateVacation === "Sim",
+    compensate_vacation: absenceCompensationMode(absence.compensateVacation) !== "Descontar do salário",
+    compensation_mode: absenceCompensationMode(absence.compensateVacation),
     status: absence.status || "Pendente",
     reason: absence.reason || "",
     decided_by: absence.decidedBy || "",
@@ -1806,7 +1856,7 @@ function renderAbsences() {
       <td>${date(item.date)}</td>
       <td>${esc(item.type)}</td>
       <td><span class="status ${cls(item.status)}">${esc(item.status)}</span></td>
-      <td><strong>${esc(item.compensateVacation === "Sim" ? "Compensada com férias" : "Sem compensação")}</strong><small>${esc(item.reason || "Sem motivo")}</small></td>
+      <td><strong>${esc(absenceCompensationLabel(item.compensateVacation))}</strong><small>${esc(item.reason || "Sem motivo")}</small></td>
       <td><div class="row-actions">${role() !== "Funcionario" ? `<button class="row-action" data-edit-absence="${item.id}">Editar</button><button class="row-action approve" data-approve-absence="${item.id}">Validar</button><button class="row-action delete" data-reject-absence="${item.id}">Rejeitar</button>` : ""}</div></td>
     </tr>`);
 }
@@ -1955,30 +2005,29 @@ function vacationMapPeople(filters = vacationMapFilters(), records = [], extraUs
 }
 
 function vacationMapCellInfo(userId, iso, monthRecords) {
-  const item = monthRecords.find((record) => record.userId === userId && iso >= record.startDate && iso <= record.endDate);
-  const specialDay = vacationMapSpecialDayInfo(iso);
+  const item = latestVacationMapRecordForCell(userId, iso, monthRecords);
   const override = vacationMapOverride(userId, iso);
+  const specialDay = vacationMapSpecialDayInfo(iso);
+  if (override) {
+    const overrideCode = normalizeVacationCode(override.code || item?.mapCode || item?.code || (item ? vacationCode(item, iso) : ""));
+    const legendColor = vacationMapLegendItems().find((legendItem) => normalizeVacationCode(legendItem.code) === overrideCode)?.color || "";
+    return {
+      value: overrideCode,
+      className: vacationMapClassForCode(overrideCode),
+      color: override.color || legendColor,
+      title: `${userName(userId)} - ${date(iso)} - Manual: ${overrideCode}${specialDay ? ` / ${specialDay.label}` : ""}`
+    };
+  }
   if (specialDay) {
-    const overlayCode = normalizeVacationCode(override?.code || item?.mapCode || item?.code || (item ? vacationCode(item, iso) : ""));
+    const overlayCode = normalizeVacationCode(item?.mapCode || item?.code || (item ? vacationCode(item, iso) : ""));
     const displayCode = overlayCode || specialDay.value;
     return {
       value: displayCode,
       className: `${specialDay.className}${overlayCode ? ` ${vacationMapClassForCode(overlayCode)}` : ""}`,
       color: specialDay.color,
-      title: override
-        ? `${userName(userId)} - ${date(iso)} - ${specialDay.label} / Manual: ${displayCode}`
-        : item
-          ? `${userName(userId)} - ${date(iso)} - ${specialDay.label} / ${vacationCodeLabel(vacationCode(item, iso))}`
-          : `${userName(userId)} - ${date(iso)} - ${specialDay.label}`
-    };
-  }
-  if (override) {
-    const overrideCode = normalizeVacationCode(override.code || "");
-    return {
-      value: overrideCode,
-      className: vacationMapClassForCode(overrideCode),
-      color: override.color || "",
-      title: `${userName(userId)} - ${date(iso)} - Manual: ${overrideCode}`
+      title: item
+        ? `${userName(userId)} - ${date(iso)} - ${specialDay.label} / ${vacationCodeLabel(vacationCode(item, iso))}`
+        : `${userName(userId)} - ${date(iso)} - ${specialDay.label}`
     };
   }
   if (item) {
@@ -1999,6 +2048,31 @@ function vacationMapCellInfo(userId, iso, monthRecords) {
     };
   }
   return { value: "", className: "", title: `${userName(userId)} - ${date(iso)}` };
+}
+
+function latestVacationMapRecordForCell(userId, iso, monthRecords) {
+  const matches = monthRecords.filter((record) => record.userId === userId && iso >= record.startDate && iso <= record.endDate);
+  if (!matches.length) return null;
+  return matches
+    .slice()
+    .sort((a, b) => {
+      const statusWeightDiff = vacationMapRecordWeight(b.status) - vacationMapRecordWeight(a.status);
+      if (statusWeightDiff) return statusWeightDiff;
+      return vacationMapRecordTimestamp(b) - vacationMapRecordTimestamp(a);
+    })[0] || null;
+}
+
+function vacationMapRecordWeight(status) {
+  if (status === "Aprovado") return 3;
+  if (status === "Pendente") return 2;
+  if (status === "Rejeitado") return 1;
+  return 0;
+}
+
+function vacationMapRecordTimestamp(record) {
+  const value = record?.decidedAt || record?.updatedAt || record?.updated_at || record?.approvedAt || record?.approved_at || record?.createdAt || record?.created_at || "";
+  const timestamp = new Date(value).getTime();
+  return Number.isNaN(timestamp) ? 0 : timestamp;
 }
 
 function vacationMapSpecialDayInfo(iso) {
@@ -2401,7 +2475,7 @@ function dialogSubtitle(mode) {
   if (mode === "vacation") return role() === "Funcionario"
     ? `Escolha as datas. O sistema calcula os dias úteis. O limite começa nos ${maxVacationRequestDays} dias e aumenta apenas se Admin/RH autorizar dias extra para o seu perfil.`
     : `Escolha as datas. Marcações manuais de Admin/RH respeitam o limite anual de ${adminVacationDays} dias por colaborador.`;
-  if (mode === "absence") return "Registe a falta e indique se ela deve ser compensada com 1 dia de férias.";
+  if (mode === "absence") return "Registe a falta e indique como ela deve ser tratada.";
   return "Preencha os dados principais.";
 }
 
@@ -2652,7 +2726,9 @@ function handleSubmit(event) {
       data.origin = "Funcionario";
       data.status = "Pendente";
     }
-    if (!editingId && ["Admin", "RH"].includes(role()) && data.userId === currentUser()?.id) data.status = "Pendente";
+    if (["Admin", "RH"].includes(role())) {
+      data.status = data.status || "Aprovado";
+    }
     data.mapCode = deriveVacationCode(data);
     const validation = validateVacation(data);
     if (!validation.ok) {
@@ -2669,11 +2745,12 @@ function handleSubmit(event) {
   if (dialogMode === "absence") {
     const wasEditingAbsence = Boolean(editingId);
     data.attachments = cloneAttachments(dialogAttachments);
+    data.compensateVacation = absenceCompensationMode(data.compensateVacation);
     const existingCompensation = editingId && state.vacations.some((item) => item.linkedAbsenceId === editingId);
     const absenceYear = Number(String(data.date || today()).slice(0, 4));
     const allowance = vacationAllowance(data.userId, absenceYear);
     const usedForCompensation = vacationDaysUsed(data.userId, null, absenceYear) - (existingCompensation ? 1 : 0);
-    if (data.compensateVacation === "Sim" && data.status !== "Rejeitado" && usedForCompensation + 1 > allowance) {
+    if (data.compensateVacation === "Compensar com 1 dia de férias" && data.status !== "Rejeitado" && usedForCompensation + 1 > allowance) {
       qs("#formAlert").textContent = `Não é possível compensar com férias porque o colaborador já atingiu o limite anual de ${allowance} dias.`;
       return;
     }
@@ -2705,6 +2782,9 @@ function handleSubmit(event) {
   if (dialogMode === "vacation" && !wasEditing) notifyVacationRequest(savedRecord);
   qs("#recordDialog").close();
   saveState();
+  if (dialogMode === "vacation" && savedRecord?.status === "Aprovado") {
+    void saveStateToSupabase();
+  }
 }
 
 function applyOrderHistory(order, previousRecord, historyDate, manualNote, wasEditing) {
@@ -2926,8 +3006,15 @@ function updateVacationCalculation() {
   });
   const vacationYear = Number(String(start.value || today()).slice(0, 4));
   const origin = form.elements.origin?.value || (role() === "Funcionario" ? "Funcionario" : "Admin/RH");
-  const periodLimit = manualEntry ? adminVacationDays : vacationAllowance(form.elements.userId.value, vacationYear, "Funcionario");
-  if (!manualEntry) {
+  const countsTowardAllowance = vacationCountsTowardAllowance({
+    mapCode: form.elements.mapCode?.value,
+    origin,
+    notes: form.elements.notes?.value
+  });
+  const periodLimit = countsTowardAllowance && !manualEntry
+    ? vacationAllowance(form.elements.userId.value, vacationYear, "Funcionario")
+    : adminVacationDays;
+  if (countsTowardAllowance && !manualEntry) {
     const admissionValidation = validateVacationAdmission(form.elements.userId.value, start.value);
     if (!admissionValidation.ok) {
       end.value = "";
@@ -2956,32 +3043,39 @@ function updateVacationCalculation() {
   const allowance = vacationAllowance(form.elements.userId.value, vacationYear, origin);
   const used = vacationDaysUsedForAllowance(form.elements.userId.value, editingId, vacationYear, origin);
   const remaining = Math.max(allowance - used - total, 0);
-  if (hint) hint.textContent = `Total deste pedido: ${total} dias úteis. Já usados/pendentes: ${used}/${allowance}. Restam após este pedido: ${remaining}.`;
+  if (hint) {
+    hint.textContent = countsTowardAllowance
+      ? `Total deste pedido: ${total} dias úteis. Já usados/pendentes: ${used}/${allowance}. Restam após este pedido: ${remaining}.`
+      : `Total deste pedido: ${total} dias úteis. Este registo não conta para o limite anual de férias.`;
+  }
 }
 
 function validateVacation(data) {
   const days = businessDays(data.startDate, data.endDate);
   const manualEntry = vacationIsManualEntry(data);
+  const countsTowardAllowance = vacationCountsTowardAllowance(data);
   const vacationYear = Number(String(data.startDate || today()).slice(0, 4));
-  const periodLimit = manualEntry ? adminVacationDays : vacationAllowance(data.userId, vacationYear, "Funcionario");
+  const periodLimit = countsTowardAllowance && !manualEntry
+    ? vacationAllowance(data.userId, vacationYear, "Funcionario")
+    : adminVacationDays;
   if (!data.startDate || !data.endDate) return { ok: false, message: "Preencha a data inicial e a data final." };
   if (new Date(data.endDate) < new Date(data.startDate)) return { ok: false, message: "A data final não pode ser anterior à data inicial." };
   if (data.endDate > addDays(data.startDate, periodLimit - 1)) return { ok: false, message: `A data final pode ir apenas até ${periodLimit} dias corridos a partir da data inicial.` };
   if (days < 1) return { ok: false, message: "O período precisa ter pelo menos 1 dia útil." };
   if (days > periodLimit) return { ok: false, message: `Este registo de férias pode ter no máximo ${periodLimit} dias úteis a partir da data inicial.` };
-  if (!manualEntry) {
+  if (countsTowardAllowance && !manualEntry) {
     const admissionValidation = validateVacationAdmission(data.userId, data.startDate);
     if (!admissionValidation.ok) return admissionValidation;
   }
   const allowance = vacationAllowance(data.userId, vacationYear, data.origin);
   const used = vacationDaysUsedForAllowance(data.userId, editingId, vacationYear, data.origin);
-  if (used + days > allowance) return { ok: false, message: `Este colaborador já tem ${used} dias usados/pendentes. O limite anual é ${allowance} dias.` };
+  if (countsTowardAllowance && used + days > allowance) return { ok: false, message: `Este colaborador já tem ${used} dias usados/pendentes. O limite anual é ${allowance} dias.` };
   return { ok: true, days };
 }
 
 function deriveVacationCode(data = {}) {
   const candidate = normalizeVacationCode(data.mapCode || data.code || "");
-  if (["F", "BH", "DC"].includes(candidate)) return candidate;
+  if (["F", "BH", "DC", "A", "M"].includes(candidate)) return candidate;
   if (String(data.origin || "").toLowerCase().includes("compensa")) return "DC";
   if (String(data.origin || "").toLowerCase().includes("banco")) return "BH";
   if (String(data.notes || "").toLowerCase().includes("compensa")) return "DC";
@@ -2994,6 +3088,34 @@ function normalizeVacationCode(code = "") {
   if (valueText === "BG") return "BH";
   if (["F", "BH", "DC", "A", "M", "N", "X", "C"].includes(valueText)) return valueText;
   return valueText;
+}
+
+function absenceCompensationLabel(value) {
+  return absenceCompensationMode(value);
+}
+
+function absenceCompensationMode(value) {
+  if (value === true) return "Compensar com 1 dia de férias";
+  if (value === false || value === null || value === undefined) return "Descontar do salário";
+  const normalized = String(value || "").trim();
+  if (["Compensar com 1 dia de férias", "Compensar com banco de horas", "Descontar do salário"].includes(normalized)) return normalized;
+  if (normalized === "Sim") return "Compensar com 1 dia de férias";
+  if (normalized === "Não" || normalized === "Nao") return "Descontar do salário";
+  if (normalized === "true") return "Compensar com 1 dia de férias";
+  if (normalized === "false") return "Descontar do salário";
+  return "Descontar do salário";
+}
+
+function absenceCompensationCode(value) {
+  const mode = absenceCompensationMode(value);
+  if (mode === "Compensar com banco de horas") return "BH";
+  if (mode === "Compensar com 1 dia de férias") return "F";
+  return "";
+}
+
+function vacationCountsTowardAllowance(item = {}) {
+  const code = vacationCode(item);
+  return ["F", "A", "M"].includes(code);
 }
 
 function vacationRequestExtraDays(userId) {
@@ -3035,6 +3157,7 @@ function vacationDaysUsed(userId, ignoreId = null, year = new Date().getFullYear
     .filter((item) => item.userId === userId && item.id !== ignoreId && item.status !== "Rejeitado")
     .filter((item) => Number(String(item.startDate || "").slice(0, 4)) === Number(year))
     .filter((item) => !origin || item.origin === origin)
+    .filter((item) => vacationCountsTowardAllowance(item))
     .reduce((total, item) => total + Number(item.days || 0), 0);
 }
 
@@ -3105,7 +3228,7 @@ function saveAbsenceWithCompensation(data) {
   if (index >= 0) target[index] = { ...target[index], ...record };
   else target.push(record);
 
-  syncAbsenceCompensation(record);
+  syncAbsenceCompensationV2(record);
   return record;
 }
 
@@ -3129,6 +3252,31 @@ function syncAbsenceCompensation(absence) {
   });
 }
 
+function syncAbsenceCompensationV2(absence) {
+  const removed = state.vacations.filter((item) => item.linkedAbsenceId === absence.id);
+  state.vacations = state.vacations.filter((item) => item.linkedAbsenceId !== absence.id);
+  removed.forEach((item) => void deleteSupabaseRecord("vacations", item.id));
+
+  const compensationMode = absenceCompensationMode(absence.compensateVacation);
+  const compensationCode = absenceCompensationCode(compensationMode);
+  if (!compensationCode || absence.status === "Rejeitado") return;
+
+  const status = absence.status === "Aprovado" ? "Aprovado" : "Pendente";
+  state.vacations.push({
+    id: `vac-comp-${absence.id}`,
+    userId: absence.userId,
+    startDate: absence.date,
+    endDate: absence.date,
+    days: "1",
+    origin: "Compensação de falta",
+    mapCode: compensationCode,
+    status,
+    notes: `Compensação da falta de ${date(absence.date)} para ${compensationMode.toLowerCase()}.`,
+    decidedBy: status === "Aprovado" ? currentUser()?.name || "Admin/RH" : "",
+    linkedAbsenceId: absence.id
+  });
+}
+
 function collection(mode) {
   return { client: state.clients, company: state.companies, order: state.orders, user: state.users, vacation: state.vacations, absence: state.absences }[mode];
 }
@@ -3136,7 +3284,7 @@ function collection(mode) {
 function defaultRecord(mode) {
   if (mode === "order") return { clientId: state.clients[0]?.id, status: "Nota de encomenda recebida", progress: "0", clientDocumentAccess: "Cronograma", showPlanningToClient: "Não", showScheduleToClient: "Sim", history: [] };
   if (mode === "vacation") return { userId: currentUser()?.id || "user-funcionario", origin: role() === "Funcionario" ? "Funcionario" : "Admin/RH", status: role() === "Funcionario" ? "Pendente" : "Aprovado" };
-  if (mode === "absence") return { userId: currentUser()?.id || "user-funcionario", type: "Justificada", compensateVacation: "Não", status: "Pendente" };
+  if (mode === "absence") return { userId: currentUser()?.id || "user-funcionario", type: "Justificada", compensateVacation: "Descontar do salário", status: "Pendente" };
   if (mode === "user") return { employeeNumber: `COL-${String(state.users.length + 1).padStart(3, "0")}`, admissionDate: "", role: "Funcionario", status: "Ativo" };
   if (mode === "client") return { companyName: "", status: "Ativo", password: "cliente123", portalDocument: "Cronograma", portalLanguage: "Português" };
   return {};
@@ -3172,7 +3320,7 @@ function approve(mode, id, status) {
   item.decidedBy = currentUser()?.name || "Admin";
   item.decidedById = currentUser()?.id || "";
   item.decidedAt = new Date().toISOString();
-  if (mode === "absence") syncAbsenceCompensation(item);
+  if (mode === "absence") syncAbsenceCompensationV2(item);
   if (mode === "vacation") addNotification({
     to: `user:${item.userId}`,
     title: `Pedido de férias ${status.toLowerCase()}`,
@@ -3190,6 +3338,9 @@ function approve(mode, id, status) {
     recordId: item.id
   });
   saveState();
+  if (mode === "vacation") {
+    void saveStateToSupabase();
+  }
 }
 
 function openVacationMapDialog() {
@@ -5295,7 +5446,9 @@ qs("#vacationMapSearch")?.addEventListener("input", renderVacationMap);
 qs("#vacationMapTeamFilter")?.addEventListener("change", renderVacationMap);
 qs("#vacationMapYearSelect")?.addEventListener("change", (event) => {
   vacationMapYear = Number(event.target.value || new Date().getFullYear());
+  state.vacationMapYear = vacationMapYear;
   renderVacationMap();
+  persistStateOnly();
 });
 qs("#printVacationMapButton")?.addEventListener("click", printVacationMap);
 qs("#exportVacationMapPdfButton")?.addEventListener("click", exportVacationMapPdf);
@@ -6343,6 +6496,8 @@ initSupabase();
 setView(defaultView());
 render();
 loadStateFromSupabase();
+setupSupabaseRealtimeSync();
+startSupabasePolling();
 
 
 

@@ -86,6 +86,7 @@ create table if not exists public.absences (
   date date not null,
   type text not null default 'Justificada',
   compensate_vacation boolean not null default false,
+  compensation_mode text not null default 'Descontar do salário',
   status text not null default 'Pendente' check (status in ('Pendente', 'Aprovado', 'Rejeitado')),
   reason text,
   decided_by text,
