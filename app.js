@@ -175,6 +175,7 @@ const orderNotificationTimers = new Map();
 let applyingRemoteState = false;
 let savingSupabase = false;
 let refreshingSupabase = false;
+let pendingSupabaseRefresh = false;
 
 const views = {
   dashboard: qs("#dashboardView"),
@@ -578,10 +579,10 @@ function persistLocalState() {
   localStorage.setItem(storageKey, JSON.stringify(state));
 }
 
-function syncVacationStateNow() {
+async function syncVacationStateNow() {
   clearTimeout(supabaseSaveTimer);
   persistLocalState();
-  void saveStateToSupabase();
+  await saveStateToSupabase();
 }
 
 function initSupabase() {
@@ -594,6 +595,10 @@ function initSupabase() {
 async function loadStateFromSupabase({ persistRemoteSnapshot = true } = {}) {
   if (!supabaseClient) return;
   if (refreshingSupabase) return;
+  if (savingSupabase) {
+    pendingSupabaseRefresh = true;
+    return;
+  }
   const config = window.DUOMOLD_SUPABASE;
   refreshingSupabase = true;
   try {
@@ -609,6 +614,14 @@ async function loadStateFromSupabase({ persistRemoteSnapshot = true } = {}) {
       state.absences = [];
       await loadCoreDataFromSupabase();
       await saveStateToSupabase();
+      render();
+      return;
+    }
+    const localHasVacationMapState = Array.isArray(state.vacationMapOverrides) && state.vacationMapOverrides.length
+      || Boolean(state.vacationMapDocument && Object.keys(state.vacationMapDocument).length)
+      || Boolean(state.vacationMapYear);
+    if (!Object.keys(remoteState || {}).length && localHasVacationMapState) {
+      await loadCoreDataFromSupabase({ persistRemoteSnapshot });
       render();
       return;
     }
@@ -657,6 +670,10 @@ async function saveStateToSupabase() {
     console.warn("Nao foi possivel gravar no Supabase. Os dados ficaram guardados localmente.", error);
   } finally {
     savingSupabase = false;
+    if (pendingSupabaseRefresh) {
+      pendingSupabaseRefresh = false;
+      void loadStateFromSupabase({ persistRemoteSnapshot: false });
+    }
   }
 }
 
@@ -910,7 +927,7 @@ async function loginWithCredentials(event) {
   if (supabaseLogin) await loadCoreDataFromSupabase();
   state.activeAccount = user ? `user:${user.id}` : `client:${client.id}`;
   adminSessionAccount = user?.role === "Admin" ? `user:${user.id}` : "";
-  syncVacationStateNow();
+  await syncVacationStateNow();
   isLoggedIn = true;
   qs("#loginAlert").textContent = "";
   qs("#loginForm").reset();
@@ -2283,7 +2300,7 @@ function editVacationMapCell(cell) {
   dialog.showModal();
 }
 
-function saveVacationMapCellSelection(legendId = "") {
+async function saveVacationMapCellSelection(legendId = "") {
   const dialog = qs("#vacationCellDialog");
   const userId = dialog.dataset.userId;
   const iso = dialog.dataset.date;
@@ -2317,23 +2334,23 @@ function saveVacationMapCellSelection(legendId = "") {
     return;
   }
   dialog.close();
-  syncVacationStateNow();
+  await syncVacationStateNow();
   renderUsers();
   renderVacationMap();
 }
 
-function saveVacationMapDocumentField(target) {
+async function saveVacationMapDocumentField(target) {
   if (!canEditVacationMap()) return;
   const doc = vacationMapDocument();
   const valueText = target.textContent.trim();
   if (target.dataset.vacationDocField) {
     doc[target.dataset.vacationDocField] = valueText;
-    syncVacationStateNow();
+    void syncVacationStateNow();
     return;
   }
   if (target.dataset.vacationLegendIndex !== undefined) {
     doc.legend[target.dataset.vacationLegendIndex] = valueText;
-    syncVacationStateNow();
+    void syncVacationStateNow();
   }
 }
 
@@ -2365,7 +2382,7 @@ function addVacationLegendItem() {
   renderVacationLegendEditor();
 }
 
-function saveVacationLegend(event) {
+async function saveVacationLegend(event) {
   event.preventDefault();
   const rows = qsa("[data-vacation-legend-row]", qs("#vacationLegendEditor"));
   const previous = vacationMapLegendItems();
@@ -2377,7 +2394,7 @@ function saveVacationLegend(event) {
     color: row.querySelector('[name="legendColor"]').value || "#ffffff"
   }));
   qs("#vacationLegendDialog").close();
-  syncVacationStateNow();
+  await syncVacationStateNow();
   renderVacationMap();
 }
 
@@ -2707,7 +2724,7 @@ function removeAbsenceAttachment(id) {
   refreshAbsenceAttachmentArea();
 }
 
-function handleSubmit(event) {
+async function handleSubmit(event) {
   event.preventDefault();
   const data = Object.fromEntries(new FormData(event.currentTarget).entries());
   if (dialogMode === "client") {
@@ -2794,7 +2811,7 @@ function handleSubmit(event) {
   qs("#recordDialog").close();
   saveState();
   if (dialogMode === "vacation") {
-    syncVacationStateNow();
+    await syncVacationStateNow();
   }
 }
 
@@ -3324,7 +3341,7 @@ async function deleteRecord(mode, id) {
   saveState();
 }
 
-function approve(mode, id, status) {
+async function approve(mode, id, status) {
   const item = collection(mode).find((record) => record.id === id);
   if (!item) return;
   item.status = status;
@@ -3350,7 +3367,7 @@ function approve(mode, id, status) {
   });
   saveState();
   if (mode === "vacation") {
-    void saveStateToSupabase();
+    await syncVacationStateNow();
   }
 }
 
