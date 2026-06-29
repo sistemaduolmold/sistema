@@ -469,9 +469,14 @@ function loadState() {
 function mergeState(saved) {
   const merged = structuredClone(demoData);
   Object.assign(merged, saved);
-  ["companies", "users", "orders"].forEach((key) => {
+  ["companies", "orders"].forEach((key) => {
     if (!Array.isArray(merged[key]) || !merged[key].length) merged[key] = structuredClone(demoData[key]);
   });
+  if (!Array.isArray(merged.users) || !merged.users.length) {
+    merged.users = Array.isArray(state?.users) && state.users.length
+      ? structuredClone(state.users)
+      : structuredClone(demoData.users);
+  }
   if (!Array.isArray(merged.clients)) merged.clients = structuredClone(demoData.clients);
   if (!merged.clientPortalPreferences || typeof merged.clientPortalPreferences !== "object" || Array.isArray(merged.clientPortalPreferences)) {
     merged.clientPortalPreferences = {};
@@ -489,11 +494,8 @@ function mergeState(saved) {
     }
   };
   merged.users = merged.users.map((user, index) => ({ ...user, employeeNumber: user.employeeNumber || `COL-${String(index + 1).padStart(3, "0")}` }));
-  // Ferias nunca sao carregadas do localStorage nem do duomold_app_state.
-  // A fonte unica e a tabela public.vacations no Supabase.
-  merged.vacations = [];
-  // Faltas tambem usam apenas a tabela public.absences no Supabase.
-  merged.absences = [];
+  merged.vacations = cleanVacationRecords(merged.vacations, merged.users);
+  merged.absences = cleanAbsenceRecords(merged.absences, merged.users);
   const adminUser = merged.users.find((user) => user.id === "user-admin");
   if (adminUser) {
     if (!adminUser.email || adminUser.email === "admin@empresa.pt") adminUser.email = "sistemaduolmold@gmail.com";
@@ -511,9 +513,10 @@ function mergeState(saved) {
 function cleanVacationRecords(vacations, users = []) {
   const removedDemoIds = new Set(["vac-1", "vac-2"]);
   const validUserIds = new Set(users.map((user) => user.id));
+  const shouldValidateUsers = validUserIds.size > 0;
   return (Array.isArray(vacations) ? vacations : [])
     .filter((vacation) => vacation?.id && !removedDemoIds.has(vacation.id))
-    .filter((vacation) => vacation.userId && validUserIds.has(vacation.userId))
+    .filter((vacation) => vacation.userId && (!shouldValidateUsers || validUserIds.has(vacation.userId)))
     .map((vacation) => ({
       ...vacation,
       days: String(Math.min(Number(vacation.days || 0), adminVacationDays))
@@ -523,9 +526,10 @@ function cleanVacationRecords(vacations, users = []) {
 function cleanAbsenceRecords(absences, users = []) {
   const removedDemoIds = new Set(["abs-1"]);
   const validUserIds = new Set(users.map((user) => user.id));
+  const shouldValidateUsers = validUserIds.size > 0;
   return (Array.isArray(absences) ? absences : [])
     .filter((absence) => absence?.id && !removedDemoIds.has(absence.id))
-    .filter((absence) => absence.userId && validUserIds.has(absence.userId));
+    .filter((absence) => absence.userId && (!shouldValidateUsers || validUserIds.has(absence.userId)));
 }
 
 function normalizeOrderText(order) {
@@ -625,8 +629,15 @@ async function loadStateFromSupabase({ persistRemoteSnapshot = true } = {}) {
       render();
       return;
     }
+    const mergedRemoteState = {
+      ...remoteState,
+      users: Array.isArray(remoteState?.users) && remoteState.users.length ? remoteState.users : state.users,
+      vacations: Array.isArray(remoteState?.vacations) && remoteState.vacations.length ? remoteState.vacations : state.vacations,
+      absences: Array.isArray(remoteState?.absences) && remoteState.absences.length ? remoteState.absences : state.absences,
+      vacationMapOverrides: Array.isArray(remoteState?.vacationMapOverrides) && remoteState.vacationMapOverrides.length ? remoteState.vacationMapOverrides : state.vacationMapOverrides
+    };
     applyingRemoteState = true;
-    state = mergeState(remoteState);
+    state = mergeState(mergedRemoteState);
     applyingRemoteState = false;
     await loadCoreDataFromSupabase({ persistRemoteSnapshot });
     render();
@@ -688,8 +699,8 @@ function appStatePayload() {
     clients: [],
     users: [],
     orders,
-    vacations: [],
-    absences: []
+    vacations: cleanVacationRecords(state.vacations, state.users),
+    absences: cleanAbsenceRecords(state.absences, state.users)
   };
 }
 
@@ -1066,10 +1077,16 @@ async function loadCoreDataFromSupabase({ persistRemoteSnapshot = true } = {}) {
     else state.orders = orders.data.map(mapOrderFromSupabase);
 
     if (vacations.error) console.warn("Nao foi possivel carregar vacations.", vacations.error);
-    else state.vacations = cleanVacationRecords(vacations.data.map(mapVacationFromSupabase), state.users);
+    else {
+      const remoteVacations = cleanVacationRecords(vacations.data.map(mapVacationFromSupabase), state.users);
+      if (remoteVacations.length || !state.vacations.length) state.vacations = remoteVacations;
+    }
 
     if (absences.error) console.warn("Nao foi possivel carregar absences.", absences.error);
-    else state.absences = cleanAbsenceRecords(absences.data.map(mapAbsenceFromSupabase), state.users);
+    else {
+      const remoteAbsences = cleanAbsenceRecords(absences.data.map(mapAbsenceFromSupabase), state.users);
+      if (remoteAbsences.length || !state.absences.length) state.absences = remoteAbsences;
+    }
 
     if (notifications.error) console.warn("Nao foi possivel carregar notifications.", notifications.error);
     else state.notifications = mergeSupabaseCollection(state.notifications, notifications.data.map(mapNotificationFromSupabase));
@@ -1327,7 +1344,7 @@ function vacationToSupabase(vacation) {
     end_date: vacation.endDate || null,
     days: Number(vacation.days || 0),
     origin: vacation.origin || "Funcionario",
-    map_code: normalizeVacationCode(vacationCode(vacation)),
+    map_code: normalizeVacationCode(vacation.mapCode || vacation.code || vacationCode(vacation)),
     status: vacation.status || "Pendente",
     notes: vacation.notes || "",
     decided_by: vacation.decidedBy || "",
@@ -2272,8 +2289,6 @@ function vacationMapRecords(filters = {}) {
 
 function vacationMapRecordVisible(item) {
   if (!item) return false;
-  if (item.status === "Rejeitado") return false;
-  if (item.origin === "Admin/RH") return true;
   return item.status === "Aprovado";
 }
 
@@ -2404,6 +2419,8 @@ function vacationTeamName(userId) {
 
 function vacationCode(item, iso = "") {
   if (vacationIsPreviousYearEntry(item, iso)) return "A";
+  const explicitCode = normalizeVacationCode(item?.mapCode || item?.code || "");
+  if (explicitCode) return explicitCode;
   return normalizeVacationCode(deriveVacationCode(item));
 }
 
@@ -2512,7 +2529,7 @@ function fieldHtml([name, labelText, type, required], record) {
     ? normalizeVacationCode(record[name] || "F")
     : record[name] || "";
   const req = required ? "required" : "";
-  const vacationCodeHelp = "F - Férias | BH - Banco de horas | DC - Descanso compensatório | A - Férias do ano anterior / Meio dias de férias";
+  const vacationCodeHelp = "F - Férias | BH - Banco de horas | DC - Descanso compensatório | A - Férias do ano anterior";
   const vacationCodeHint = name === "mapCode" && dialogMode === "vacation"
     ? `<small class="field-help-text">${esc(vacationCodeHelp)}</small>`
     : "";
@@ -2531,7 +2548,8 @@ function fieldHtml([name, labelText, type, required], record) {
   }
   if (type === "attachments" && dialogMode === "absence") return absenceAttachmentsField();
   if (type.startsWith("select:")) {
-    const options = type.replace("select:", "").split("|").map((item) => {
+    const optionValues = type.replace("select:", "").split("|");
+    const options = optionValues.map((item) => {
       return [item, item];
     });
     if (name === "mapCode" && dialogMode === "vacation") {
@@ -2808,10 +2826,13 @@ async function handleSubmit(event) {
   }
   if (dialogMode === "order") notifyOrderChange(savedRecord, wasEditing);
   if (dialogMode === "vacation" && !wasEditing) notifyVacationRequest(savedRecord);
+  if (dialogMode === "vacation") syncApprovedAdminVacationToMap(savedRecord);
   qs("#recordDialog").close();
   saveState();
   if (dialogMode === "vacation") {
     await syncVacationStateNow();
+    await loadStateFromSupabase({ persistRemoteSnapshot: false });
+    render();
   }
 }
 
@@ -3215,6 +3236,54 @@ function vacationRecordCoversDate(userId, iso, ignoreId = null) {
   ));
 }
 
+function businessDayDates(startValue, endValue) {
+  if (!startValue || !endValue) return [];
+  const start = new Date(`${startValue}T00:00:00`);
+  const end = new Date(`${endValue}T00:00:00`);
+  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime()) || end < start) return [];
+  const dates = [];
+  const current = new Date(start);
+  while (current <= end) {
+    const day = current.getDay();
+    if (day !== 0 && day !== 6) {
+      const month = String(current.getMonth() + 1).padStart(2, "0");
+      const dateDay = String(current.getDate()).padStart(2, "0");
+      dates.push(`${current.getFullYear()}-${month}-${dateDay}`);
+    }
+    current.setDate(current.getDate() + 1);
+  }
+  return dates;
+}
+
+function removeVacationFormOverrides(vacationId = "") {
+  if (!vacationId) return;
+  state.vacationMapOverrides = state.vacationMapOverrides.filter((item) => item.sourceVacationId !== vacationId);
+}
+
+function syncApprovedAdminVacationToMap(vacation) {
+  if (!vacation?.id) return;
+  removeVacationFormOverrides(vacation.id);
+  if (vacation.origin !== "Admin/RH" || vacation.status !== "Aprovado") return;
+  const code = normalizeVacationCode(vacation.mapCode || vacation.code || "F");
+  const legendItem = vacationMapLegendItems().find((item) => normalizeVacationCode(item.code) === code);
+  const color = legendItem?.color || "#ffffff";
+  const label = legendItem?.label || vacationCodeLabel(code) || code;
+  businessDayDates(vacation.startDate, vacation.endDate).forEach((iso) => {
+    state.vacationMapOverrides = state.vacationMapOverrides.filter((item) => !(item.userId === vacation.userId && item.date === iso && item.sourceVacationId === vacation.id));
+    state.vacationMapOverrides.push({
+      userId: vacation.userId,
+      date: iso,
+      legendId: legendItem?.id || "",
+      code,
+      color,
+      label,
+      updatedBy: currentUser()?.id || "",
+      updatedAt: new Date().toISOString(),
+      sourceVacationId: vacation.id
+    });
+  });
+}
+
 function businessDays(startValue, endValue) {
   if (!startValue || !endValue) return 0;
   const start = new Date(`${startValue}T00:00:00`);
@@ -3327,12 +3396,15 @@ async function deleteRecord(mode, id) {
   if (!confirm(`Apagar ${label(mode)}?`)) return;
   const key = { client: "clients", company: "companies", order: "orders", user: "users", vacation: "vacations", absence: "absences" }[mode];
   const previousRecords = state[key];
+  const previousOverrides = mode === "vacation" ? [...state.vacationMapOverrides] : null;
   state[key] = state[key].filter((item) => item.id !== id);
+  if (mode === "vacation") removeVacationFormOverrides(id);
   if (mode === "absence") state.vacations = state.vacations.filter((item) => item.linkedAbsenceId !== id);
   const tableName = { client: "clients", company: "companies", order: "orders", user: "users", vacation: "vacations", absence: "absences" }[mode];
   const deleted = await deleteSupabaseRecord(tableName, id);
   if (!deleted) {
     state[key] = previousRecords;
+    if (mode === "vacation" && previousOverrides) state.vacationMapOverrides = previousOverrides;
     alert(`Não foi possível apagar ${label(mode)} na base de dados. Confirme as permissões do Supabase e tente novamente.`);
     render();
     return;
