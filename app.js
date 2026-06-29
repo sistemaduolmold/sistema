@@ -1090,7 +1090,7 @@ function startSupabasePolling() {
   if (!supabaseClient || supabasePollingTimer) return;
   supabasePollingTimer = setInterval(() => {
     if (!document.hidden) void loadStateFromSupabase({ persistRemoteSnapshot: false });
-  }, 10000);
+  }, 3000);
 }
 
 function mergeSupabaseCollection(existingRows = [], supabaseRows = []) {
@@ -3351,15 +3351,17 @@ function approve(mode, id, status) {
   }
 }
 
-function openVacationMapDialog() {
+async function openVacationMapDialog() {
   if (isClient() || !["Admin", "RH"].includes(role())) return;
+  await loadStateFromSupabase({ persistRemoteSnapshot: false });
   renderVacationMap();
   qs("#vacationMapDialog")?.showModal();
   startVacationMapAutoRefresh();
 }
 
-function printVacationMap() {
+async function printVacationMap() {
   if (isClient() || !["Admin", "RH"].includes(role())) return;
+  await loadStateFromSupabase({ persistRemoteSnapshot: false });
   renderVacationMap();
   const dialog = qs("#vacationMapDialog");
   if (dialog && !dialog.open) dialog.showModal();
@@ -3377,7 +3379,7 @@ function startVacationMapAutoRefresh() {
     const dialog = qs("#vacationMapDialog");
     if (!dialog?.open || document.hidden) return;
     void loadStateFromSupabase({ persistRemoteSnapshot: false });
-  }, 5000);
+  }, 2000);
 }
 
 function stopVacationMapAutoRefresh() {
