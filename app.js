@@ -170,6 +170,7 @@ let supabaseSaveTimer = null;
 let supabaseRemoteRefreshTimer = null;
 let supabasePollingTimer = null;
 let supabaseRealtimeChannel = null;
+let vacationMapAutoRefreshTimer = null;
 const orderNotificationTimers = new Map();
 let applyingRemoteState = false;
 let savingSupabase = false;
@@ -577,6 +578,12 @@ function persistLocalState() {
   localStorage.setItem(storageKey, JSON.stringify(state));
 }
 
+function syncVacationStateNow() {
+  clearTimeout(supabaseSaveTimer);
+  persistLocalState();
+  void saveStateToSupabase();
+}
+
 function initSupabase() {
   const config = window.DUOMOLD_SUPABASE;
   if (!config?.url || !config?.anonKey || config.anonKey.includes("COLE_AQUI")) return;
@@ -900,7 +907,7 @@ async function loginWithCredentials(event) {
   if (supabaseLogin) await loadCoreDataFromSupabase();
   state.activeAccount = user ? `user:${user.id}` : `client:${client.id}`;
   adminSessionAccount = user?.role === "Admin" ? `user:${user.id}` : "";
-  persistStateOnly();
+  syncVacationStateNow();
   isLoggedIn = true;
   qs("#loginAlert").textContent = "";
   qs("#loginForm").reset();
@@ -911,6 +918,7 @@ async function loginWithCredentials(event) {
 function logout() {
   isLoggedIn = false;
   adminSessionAccount = "";
+  stopVacationMapAutoRefresh();
   qsa("dialog[open]").forEach((dialog) => dialog.close());
   render();
 }
@@ -2306,7 +2314,7 @@ function saveVacationMapCellSelection(legendId = "") {
     return;
   }
   dialog.close();
-  persistStateOnly();
+  syncVacationStateNow();
   renderUsers();
   renderVacationMap();
 }
@@ -2317,12 +2325,12 @@ function saveVacationMapDocumentField(target) {
   const valueText = target.textContent.trim();
   if (target.dataset.vacationDocField) {
     doc[target.dataset.vacationDocField] = valueText;
-    persistStateOnly();
+    syncVacationStateNow();
     return;
   }
   if (target.dataset.vacationLegendIndex !== undefined) {
     doc.legend[target.dataset.vacationLegendIndex] = valueText;
-    persistStateOnly();
+    syncVacationStateNow();
   }
 }
 
@@ -2366,7 +2374,7 @@ function saveVacationLegend(event) {
     color: row.querySelector('[name="legendColor"]').value || "#ffffff"
   }));
   qs("#vacationLegendDialog").close();
-  persistStateOnly();
+  syncVacationStateNow();
   renderVacationMap();
 }
 
@@ -3347,6 +3355,7 @@ function openVacationMapDialog() {
   if (isClient() || !["Admin", "RH"].includes(role())) return;
   renderVacationMap();
   qs("#vacationMapDialog")?.showModal();
+  startVacationMapAutoRefresh();
 }
 
 function printVacationMap() {
@@ -3354,11 +3363,26 @@ function printVacationMap() {
   renderVacationMap();
   const dialog = qs("#vacationMapDialog");
   if (dialog && !dialog.open) dialog.showModal();
+  startVacationMapAutoRefresh();
   document.body.classList.add("printing-vacation-map");
   setTimeout(() => {
     window.print();
     setTimeout(() => document.body.classList.remove("printing-vacation-map"), 250);
   }, 50);
+}
+
+function startVacationMapAutoRefresh() {
+  if (vacationMapAutoRefreshTimer || !supabaseClient) return;
+  vacationMapAutoRefreshTimer = setInterval(() => {
+    const dialog = qs("#vacationMapDialog");
+    if (!dialog?.open || document.hidden) return;
+    void loadStateFromSupabase({ persistRemoteSnapshot: false });
+  }, 5000);
+}
+
+function stopVacationMapAutoRefresh() {
+  clearInterval(vacationMapAutoRefreshTimer);
+  vacationMapAutoRefreshTimer = null;
 }
 
 async function exportVacationMapExcel() {
@@ -5441,7 +5465,11 @@ qs("#addVacationButton").addEventListener("click", () => openDialog("vacation"))
 qs("#addAbsenceButton").addEventListener("click", () => openDialog("absence"));
 qs("#employeeVacationShortcut").addEventListener("click", () => openDialog("vacation"));
 qs("#openVacationMapButton")?.addEventListener("click", openVacationMapPrintableDocument);
-qs("#closeVacationMapButton")?.addEventListener("click", () => qs("#vacationMapDialog")?.close());
+qs("#closeVacationMapButton")?.addEventListener("click", () => {
+  stopVacationMapAutoRefresh();
+  qs("#vacationMapDialog")?.close();
+});
+qs("#vacationMapDialog")?.addEventListener("close", stopVacationMapAutoRefresh);
 qs("#vacationMapSearch")?.addEventListener("input", renderVacationMap);
 qs("#vacationMapTeamFilter")?.addEventListener("change", renderVacationMap);
 qs("#vacationMapYearSelect")?.addEventListener("change", (event) => {
@@ -6486,6 +6514,18 @@ window.addEventListener("beforeprint", () => {
 
 window.addEventListener("afterprint", () => {
   document.body.classList.remove("printing-schedule", "printing-planning", "printing-vacation-map");
+});
+
+window.addEventListener("focus", () => {
+  if (qs("#vacationMapDialog")?.open && !isClient() && ["Admin", "RH"].includes(role())) {
+    void loadStateFromSupabase({ persistRemoteSnapshot: false });
+  }
+});
+
+document.addEventListener("visibilitychange", () => {
+  if (!document.hidden && qs("#vacationMapDialog")?.open && !isClient() && ["Admin", "RH"].includes(role())) {
+    void loadStateFromSupabase({ persistRemoteSnapshot: false });
+  }
 });
 
 function toDatasetKey(key) {
