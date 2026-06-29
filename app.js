@@ -640,6 +640,7 @@ async function saveStateToSupabase() {
   const config = window.DUOMOLD_SUPABASE;
   savingSupabase = true;
   try {
+    await syncCoreTablesToSupabase();
     const payload = {
       id: config.stateId,
       data: appStatePayload(),
@@ -649,7 +650,6 @@ async function saveStateToSupabase() {
       .from(config.stateTable)
       .upsert(payload, { onConflict: "id" });
     if (error) console.warn("Nao foi possivel gravar o estado geral no Supabase.", error);
-    await syncCoreTablesToSupabase();
   } catch (error) {
     console.warn("Nao foi possivel gravar no Supabase. Os dados ficaram guardados localmente.", error);
   } finally {
@@ -2790,8 +2790,8 @@ function handleSubmit(event) {
   if (dialogMode === "vacation" && !wasEditing) notifyVacationRequest(savedRecord);
   qs("#recordDialog").close();
   saveState();
-  if (dialogMode === "vacation" && savedRecord?.status === "Aprovado") {
-    void saveStateToSupabase();
+  if (dialogMode === "vacation") {
+    syncVacationStateNow();
   }
 }
 
