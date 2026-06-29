@@ -1082,7 +1082,7 @@ function startSupabasePolling() {
   if (!supabaseClient || supabasePollingTimer) return;
   supabasePollingTimer = setInterval(() => {
     if (!document.hidden) void loadStateFromSupabase({ persistRemoteSnapshot: false });
-  }, 30000);
+  }, 10000);
 }
 
 function mergeSupabaseCollection(existingRows = [], supabaseRows = []) {
