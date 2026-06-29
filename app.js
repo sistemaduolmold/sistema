@@ -599,11 +599,12 @@ async function loadStateFromSupabase({ persistRemoteSnapshot = true } = {}) {
   try {
     const { data, error } = await supabaseClient
       .from(config.stateTable)
-      .select("data")
+      .select("data,payload")
       .eq("id", config.stateId)
       .maybeSingle();
     if (error) throw error;
-    if (!data?.data) {
+    const remoteState = data?.data && Object.keys(data.data || {}).length ? data.data : data?.payload || {};
+    if (!data?.data && !data?.payload) {
       state.vacations = [];
       state.absences = [];
       await loadCoreDataFromSupabase();
@@ -612,7 +613,7 @@ async function loadStateFromSupabase({ persistRemoteSnapshot = true } = {}) {
       return;
     }
     applyingRemoteState = true;
-    state = mergeState(data.data);
+    state = mergeState(remoteState);
     applyingRemoteState = false;
     await loadCoreDataFromSupabase({ persistRemoteSnapshot });
     render();
@@ -641,9 +642,11 @@ async function saveStateToSupabase() {
   savingSupabase = true;
   try {
     await syncCoreTablesToSupabase();
+    const snapshot = appStatePayload();
     const payload = {
       id: config.stateId,
-      data: appStatePayload(),
+      data: snapshot,
+      payload: snapshot,
       updated_at: new Date().toISOString()
     };
     const { error } = await supabaseClient
