@@ -2234,11 +2234,13 @@ dialog {
 }
 
 .planning-percent-control input {
-  flex: 0 1 48px;
-  width: 48px;
-  min-width: 38px;
+  flex: 0 0 68px;
+  width: 68px;
+  min-width: 56px;
   text-align: right;
   padding: 5px 2px 5px 4px;
+  box-sizing: border-box;
+  font-variant-numeric: tabular-nums;
 }
 
 .planning-percent-control span {

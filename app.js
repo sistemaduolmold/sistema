@@ -163,8 +163,8 @@ let currentView = "adminPage";
 let dialogMode = "client";
 let editingId = null;
 let dialogAttachments = [];
-let isLoggedIn = false;
-let adminSessionAccount = "";
+let isLoggedIn = Boolean(state.sessionRemembered);
+let adminSessionAccount = currentUser()?.role === "Admin" ? state.activeAccount : "";
 let supabaseClient = null;
 let supabaseSaveTimer = null;
 let supabaseRemoteRefreshTimer = null;
@@ -469,6 +469,9 @@ function loadState() {
 function mergeState(saved) {
   const merged = structuredClone(demoData);
   Object.assign(merged, saved);
+  if (!Object.prototype.hasOwnProperty.call(saved || {}, "sessionRemembered")) {
+    merged.sessionRemembered = Boolean(merged.activeAccount);
+  }
   ["companies", "orders"].forEach((key) => {
     if (!Array.isArray(merged[key]) || !merged[key].length) merged[key] = structuredClone(demoData[key]);
   });
@@ -863,12 +866,21 @@ function render() {
 function renderAccountSelector() {
   const accountSwitcher = qs(".account-switcher");
   if (accountSwitcher) accountSwitcher.hidden = !adminSessionAccount;
+  const rhProxyAccount = state.users.find((user) => {
+    if (user.role !== "RH") return false;
+    const name = String(user.name || "").trim().toLowerCase();
+    const email = String(user.email || "").trim().toLowerCase();
+    return user.id === "user-rh" || name === "rh" || email === "rh@duomold.pt";
+  });
   const userOptions = adminSessionAccount
     ? state.users
-      .filter((user) => user.role === "Admin" || (user.role === "RH" && user.email?.toLowerCase() === "rh@duomold.pt"))
+      .filter((user) => user.role === "Admin" || (rhProxyAccount && user.id === rhProxyAccount.id))
       .map((user) => ({ value: `user:${user.id}`, label: `${user.name} - ${user.role}` }))
     : state.users.map((user) => ({ value: `user:${user.id}`, label: `${user.name} - ${user.role}` }));
   const options = [...userOptions];
+  if (adminSessionAccount && rhProxyAccount && !options.some((option) => option.value === `user:${rhProxyAccount.id}`)) {
+    options.push({ value: `user:${rhProxyAccount.id}`, label: `${rhProxyAccount.name} - ${rhProxyAccount.role}` });
+  }
   if (adminSessionAccount && !options.some((option) => option.value === adminSessionAccount)) {
     options.unshift({ value: adminSessionAccount, label: "Administrador - Admin" });
   }
@@ -937,6 +949,7 @@ async function loginWithCredentials(event) {
   }
   if (supabaseLogin) await loadCoreDataFromSupabase();
   state.activeAccount = user ? `user:${user.id}` : `client:${client.id}`;
+  state.sessionRemembered = true;
   adminSessionAccount = user?.role === "Admin" ? `user:${user.id}` : "";
   await syncVacationStateNow();
   isLoggedIn = true;
@@ -948,10 +961,12 @@ async function loginWithCredentials(event) {
 
 function logout() {
   isLoggedIn = false;
+  state.sessionRemembered = false;
+  state.activeAccount = "";
   adminSessionAccount = "";
   stopVacationMapAutoRefresh();
   qsa("dialog[open]").forEach((dialog) => dialog.close());
-  render();
+  saveState();
 }
 
 async function findSupabaseLogin(email, password) {
@@ -2495,6 +2510,9 @@ function openDialog(mode, id = null, defaults = {}) {
   editingId = id;
   const sourceMode = mode === "profileUser" ? "user" : mode === "profileClient" ? "client" : mode;
   const baseRecord = id ? collection(sourceMode).find((item) => item.id === id) : { ...defaultRecord(sourceMode), ...defaults };
+  if (sourceMode === "order" && baseRecord) {
+    baseRecord.clientId = baseRecord.clientId || baseRecord.client_id || "";
+  }
   if (sourceMode === "order" && baseRecord) applyOrderClientDocumentAccess(baseRecord);
   const record = ["client", "profileClient"].includes(mode) ? clientFormRecord(baseRecord || {}) : baseRecord;
   dialogAttachments = mode === "absence" ? cloneAttachments(record?.attachments) : [];
@@ -5212,11 +5230,11 @@ function planningFor(order, previewDate = "") {
       line.tipo = line.status;
     }
     if (!Object.keys(line.statusByDate).length && line.status !== undefined && line.status !== null && line.status !== "") {
-      line.statusByDate[planningDate] = String(line.status);
+      line.statusByDate[planningDate] = normalizePlanningPercent(line.status);
     }
     if (!Array.isArray(line.extras)) line.extras = [];
     while (line.extras.length < order.planning.campos.length) line.extras.push("");
-    line.status = planningStatusForDate(line, planningDate);
+    line.status = normalizePlanningPercent(planningStatusForDate(line, planningDate));
   });
   return order.planning;
 }
@@ -5225,12 +5243,12 @@ function planningStatusForDate(line, planningDate) {
   const values = line?.statusByDate && typeof line.statusByDate === "object" && !Array.isArray(line.statusByDate)
     ? line.statusByDate
     : {};
-  if (values[planningDate] !== undefined && values[planningDate] !== null && values[planningDate] !== "") return values[planningDate];
+  if (values[planningDate] !== undefined && values[planningDate] !== null && values[planningDate] !== "") return normalizePlanningPercent(values[planningDate]);
   const nearestDate = Object.keys(values)
     .filter((dateKey) => dateKey <= planningDate && values[dateKey] !== undefined && values[dateKey] !== null && values[dateKey] !== "")
     .sort()
     .pop();
-  return nearestDate ? values[nearestDate] : "0%";
+  return nearestDate ? normalizePlanningPercent(values[nearestDate]) : "0%";
 }
 
 function planningCurrentDate(order, previewDate = "") {
@@ -5310,7 +5328,7 @@ function planningHtml(order, readonly) {
 function planningRowHtml(line, index, fields, disabled, readonly) {
   const labels = documentText();
   const extras = fields.map((_, extraIndex) => `<td><input data-planning-row="${index}" data-planning-extra="${extraIndex}" value="${esc(line.extras?.[extraIndex] || "")}" ${disabled}></td>`).join("");
-  const statusNumber = String(line.status || "0%").replace("%", "").trim() || "0";
+  const statusNumber = String(line.status || "0%").replace(/[^\d]/g, "").trim() || "0";
   return `
     <tr class="${planningStatusClass(line.tipo || line.status)}">
       <td><input data-planning-row="${index}" data-planning-prop="id" value="${esc(line.id)}" ${disabled}></td>
@@ -5318,7 +5336,7 @@ function planningRowHtml(line, index, fields, disabled, readonly) {
       <td><input data-planning-row="${index}" data-planning-prop="duracao" value="${esc(line.duracao)}" placeholder="${esc(labels.duration === "Duration" ? "Ex.: 5 days" : "Ex.: 5 dias")}" ${disabled}></td>
       <td><input data-planning-row="${index}" data-planning-prop="inicio" type="date" value="${esc(line.inicio)}" ${disabled}></td>
       <td><input data-planning-row="${index}" data-planning-prop="conclusao" type="date" value="${esc(line.conclusao)}" ${disabled}></td>
-      <td><label class="planning-percent-control"><input data-planning-row="${index}" data-planning-prop="status" type="text" inputmode="numeric" pattern="[0-9]*" value="${esc(statusNumber)}" ${disabled}><span>%</span></label></td>
+      <td><label class="planning-percent-control"><input data-planning-row="${index}" data-planning-prop="status" type="number" inputmode="numeric" min="0" max="100" step="1" value="${esc(statusNumber)}" ${disabled}><span>%</span></label></td>
       ${extras}
       ${readonly ? "" : `<td><button class="planning-mini red" data-planning-delete-row="${index}" type="button">X</button></td>`}
     </tr>`;
@@ -5405,7 +5423,8 @@ function savePlanningNow() {
 }
 
 function normalizePlanningPercent(valueText) {
-  const valueNumber = Math.max(0, Math.min(Number(String(valueText || "0").replace("%", "")) || 0, 100));
+  const digits = String(valueText ?? "").replace(/[^\d]/g, "");
+  const valueNumber = Math.max(0, Math.min(Number(digits || 0), 100));
   return `${valueNumber}%`;
 }
 
@@ -5752,6 +5771,50 @@ qs("#addPlanningTaskButton").addEventListener("click", () => addPlanningLine("ta
 qs("#addPlanningGroupButton").addEventListener("click", () => addPlanningLine("grupo"));
 qs("#addPlanningFieldButton").addEventListener("click", addPlanningField);
 qs("#clearPlanningButton").addEventListener("click", resetPlanning);
+
+function openSchedule(orderId) {
+  openOrderDocument(orderId, "schedule");
+}
+
+function openPlanning(orderId) {
+  openOrderDocument(orderId, "planning");
+}
+
+function openOrderDocument(orderId, documentType) {
+  const order = findOrderById(orderId);
+  if (!order) return;
+  const adminView = !isClient();
+  if (!canOpenOrderDocument(order, documentType)) {
+    alert(documentType === "planning"
+      ? "Este planeamento não está disponível para este cliente."
+      : "Este cronograma não está disponível para este cliente.");
+    return;
+  }
+  if (!hasStoredOrderDocument(order, documentType)) {
+    if (adminView) {
+      if (documentType === "planning") {
+        order.planning = defaultPlanning(order);
+      } else if (!order.schedule || typeof order.schedule !== "object" || Array.isArray(order.schedule)) {
+        order.schedule = {};
+      }
+    } else {
+      alert(missingOrderDocumentMessage(documentType));
+      return;
+    }
+  }
+  const readonly = isClient();
+  const planning = documentType === "planning";
+  renderDocumentDialogLanguage(documentType, readonly, order.reference);
+  if (planning) {
+    qs("#planningBody").innerHTML = planningHtml(order, readonly);
+    ["#savePlanningButton", "#renumberPlanningButton", "#addPlanningTaskButton", "#addPlanningGroupButton", "#addPlanningFieldButton", "#clearPlanningButton"].forEach((selector) => {
+      qs(selector).hidden = readonly;
+    });
+  } else {
+    qs("#scheduleBody").innerHTML = scheduleHtml(order, readonly);
+  }
+  openAppDialog(qs(planning ? "#planningDialog" : "#scheduleDialog"));
+}
 
 function printDocument(type) {
   document.body.classList.remove("printing-schedule", "printing-planning");
