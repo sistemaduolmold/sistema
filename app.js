@@ -634,6 +634,8 @@ async function loadStateFromSupabase({ persistRemoteSnapshot = true } = {}) {
     }
     const mergedRemoteState = {
       ...remoteState,
+      activeAccount: state.activeAccount,
+      sessionRemembered: state.sessionRemembered,
       users: Array.isArray(remoteState?.users) && remoteState.users.length ? remoteState.users : state.users,
       vacations: Array.isArray(remoteState?.vacations) && remoteState.vacations.length ? remoteState.vacations : state.vacations,
       absences: Array.isArray(remoteState?.absences) && remoteState.absences.length ? remoteState.absences : state.absences,
@@ -696,8 +698,13 @@ function appStatePayload() {
     ...order,
     moldPhotos: cleanMoldPhotosForSupabase(order.moldPhotos)
   }));
+  const {
+    activeAccount,
+    sessionRemembered,
+    ...sharedState
+  } = state;
   return {
-    ...state,
+    ...sharedState,
     companies: [],
     clients: [],
     users: [],
@@ -951,6 +958,7 @@ async function loginWithCredentials(event) {
   state.activeAccount = user ? `user:${user.id}` : `client:${client.id}`;
   state.sessionRemembered = true;
   adminSessionAccount = user?.role === "Admin" ? `user:${user.id}` : "";
+  persistLocalState();
   await syncVacationStateNow();
   isLoggedIn = true;
   qs("#loginAlert").textContent = "";
