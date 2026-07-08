@@ -5242,6 +5242,7 @@ function planningFor(order, previewDate = "") {
     }
     if (!Array.isArray(line.extras)) line.extras = [];
     while (line.extras.length < order.planning.campos.length) line.extras.push("");
+    updatePlanningLineDuration(line);
     line.status = normalizePlanningPercent(planningStatusForDate(line, planningDate));
   });
   return order.planning;
@@ -5267,6 +5268,22 @@ function planningClientDateLimit(valueText = "") {
   const value = String(valueText || "").trim();
   if (!value) return "";
   return value > today() ? today() : value;
+}
+
+function planningDurationDays(startDate, endDate) {
+  const start = String(startDate || "").trim();
+  const end = String(endDate || "").trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(start) || !/^\d{4}-\d{2}-\d{2}$/.test(end)) return "";
+  const startUtc = Date.parse(`${start}T00:00:00Z`);
+  const endUtc = Date.parse(`${end}T00:00:00Z`);
+  if (Number.isNaN(startUtc) || Number.isNaN(endUtc) || endUtc < startUtc) return "";
+  const totalDays = Math.floor((endUtc - startUtc) / 86400000) + 1;
+  return `${totalDays} ${totalDays === 1 ? "dia" : "dias"}`;
+}
+
+function updatePlanningLineDuration(line) {
+  if (!line || typeof line !== "object") return;
+  line.duracao = planningDurationDays(line.inicio, line.conclusao);
 }
 
 function planningHtml(order, readonly) {
@@ -5341,7 +5358,7 @@ function planningRowHtml(line, index, fields, disabled, readonly) {
     <tr class="${planningStatusClass(line.tipo || line.status)}">
       <td><input data-planning-row="${index}" data-planning-prop="id" value="${esc(line.id)}" ${disabled}></td>
       <td><input data-planning-row="${index}" data-planning-prop="nome" value="${esc(line.nome)}" ${disabled}></td>
-      <td><input data-planning-row="${index}" data-planning-prop="duracao" value="${esc(line.duracao)}" placeholder="${esc(labels.duration === "Duration" ? "Ex.: 5 days" : "Ex.: 5 dias")}" ${disabled}></td>
+      <td><input data-planning-row="${index}" data-planning-prop="duracao" value="${esc(line.duracao)}" placeholder="${esc(labels.duration === "Duration" ? "Ex.: 5 days" : "Ex.: 5 dias")}" readonly tabindex="-1" ${disabled}></td>
       <td><input data-planning-row="${index}" data-planning-prop="inicio" type="date" value="${esc(line.inicio)}" ${disabled}></td>
       <td><input data-planning-row="${index}" data-planning-prop="conclusao" type="date" value="${esc(line.conclusao)}" ${disabled}></td>
       <td><label class="planning-percent-control"><input data-planning-row="${index}" data-planning-prop="status" type="number" inputmode="numeric" min="0" max="100" step="1" value="${esc(statusNumber)}" ${disabled}><span>%</span></label></td>
@@ -5406,6 +5423,11 @@ function savePlanningField(target) {
       line.statusByDate[planningDate] = cleanPercent;
     } else {
       line[prop] = target.value;
+      if (prop === "inicio" || prop === "conclusao") {
+        updatePlanningLineDuration(line);
+        const durationInput = target.closest("tr")?.querySelector('[data-planning-prop="duracao"]');
+        if (durationInput) durationInput.value = line.duracao;
+      }
     }
   }
   const extraIndex = target.dataset.planningExtra;
