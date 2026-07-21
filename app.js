@@ -5743,7 +5743,6 @@ qs("#demoAccountSelect").addEventListener("change", (event) => {
 qs("#newRecordButton").addEventListener("click", () => openDialog(modeFromView()));
 qs("#addClientButton").addEventListener("click", () => openDialog("client"));
 qs("#addCompanyButton").addEventListener("click", () => openDialog("company"));
-qs("#addOrderButton").addEventListener("click", () => openDialog("order"));
 qs("#addUserButton").addEventListener("click", () => {
   if (!canManageUsers()) return;
   openDialog("user");
