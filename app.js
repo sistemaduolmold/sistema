@@ -2310,7 +2310,18 @@ function mergeVacationMapOverrides(localOverrides = [], remoteOverrides = []) {
     .forEach((item) => {
       const key = vacationMapOverrideKey(item);
       const current = merged.get(key);
-      if (!current || vacationMapOverrideTimestamp(item) >= vacationMapOverrideTimestamp(current)) {
+      if (!current) {
+        merged.set(key, { ...item });
+        return;
+      }
+      if (current.cleared && !item.cleared) {
+        return;
+      }
+      if (item.cleared && !current.cleared) {
+        merged.set(key, { ...item });
+        return;
+      }
+      if (vacationMapOverrideTimestamp(item) >= vacationMapOverrideTimestamp(current)) {
         merged.set(key, { ...item });
       }
     });
@@ -2482,7 +2493,7 @@ async function saveVacationMapCellSelection(legendId = "") {
   dialog.close();
   renderUsers();
   renderVacationMap();
-  void syncVacationStateNow();
+  await syncVacationStateNow();
 }
 
 async function saveVacationMapDocumentField(target) {
@@ -3410,14 +3421,31 @@ function businessDayDates(startValue, endValue) {
   return dates;
 }
 
-function removeVacationFormOverrides(vacationId = "") {
-  if (!vacationId) return;
-  state.vacationMapOverrides = state.vacationMapOverrides.filter((item) => item.sourceVacationId !== vacationId);
+function removeVacationFormOverrides(vacation = "") {
+  if (!vacation) return;
+  if (typeof vacation === "string") {
+    state.vacationMapOverrides = state.vacationMapOverrides.filter((item) => item.sourceVacationId !== vacation);
+    return;
+  }
+  const vacationId = vacation.id || "";
+  if (vacationId) {
+    state.vacationMapOverrides = state.vacationMapOverrides.filter((item) => item.sourceVacationId !== vacationId);
+  }
+  const userId = vacation.userId || "";
+  const startDate = String(vacation.startDate || "");
+  const endDate = String(vacation.endDate || "");
+  if (userId && startDate && endDate) {
+    state.vacationMapOverrides = state.vacationMapOverrides.filter((item) => !(
+      item.userId === userId
+      && String(item.date || "") >= startDate
+      && String(item.date || "") <= endDate
+    ));
+  }
 }
 
 function syncApprovedAdminVacationToMap(vacation) {
   if (!vacation?.id) return;
-  removeVacationFormOverrides(vacation.id);
+  removeVacationFormOverrides(vacation);
   if (vacation.origin !== "Admin/RH" || vacation.status !== "Aprovado") return;
   const code = normalizeVacationCode(vacation.mapCode || vacation.code || "F");
   const legendItem = vacationMapLegendItems().find((item) => normalizeVacationCode(item.code) === code);
@@ -3555,8 +3583,9 @@ async function deleteRecord(mode, id) {
   const previousRecords = state[key];
   const previousOverrides = mode === "vacation" ? [...state.vacationMapOverrides] : null;
   const previousLinkedVacations = mode === "absence" ? state.vacations.filter((item) => item.linkedAbsenceId === id) : [];
+  const deletedVacation = mode === "vacation" ? structuredClone(state.vacations.find((item) => item.id === id) || null) : null;
   state[key] = state[key].filter((item) => item.id !== id);
-  if (mode === "vacation") removeVacationFormOverrides(id);
+  if (mode === "vacation") removeVacationFormOverrides(deletedVacation || id);
   if (mode === "absence") state.vacations = state.vacations.filter((item) => item.linkedAbsenceId !== id);
   const tableName = { client: "clients", company: "companies", order: "orders", user: "users", vacation: "vacations", absence: "absences" }[mode];
   const deleted = await deleteSupabaseRecord(tableName, id);
@@ -3599,6 +3628,7 @@ async function approve(mode, id, status) {
     recordType: "absence",
     recordId: item.id
   });
+  if (mode === "vacation") syncApprovedAdminVacationToMap(item);
   saveState();
   if (mode === "vacation") {
     await syncVacationStateNow();
