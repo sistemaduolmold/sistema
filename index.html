@@ -44,7 +44,6 @@
         </div>
 
         <nav class="nav">
-          <button class="nav-item active" data-view="dashboard" type="button">Painel</button>
           <button class="nav-item" data-view="adminPage" type="button">Admin</button>
           <button class="nav-item" data-view="rhPage" type="button">RH</button>
           <button class="nav-item" data-view="employeePage" type="button">Funcionario</button>
@@ -71,7 +70,7 @@
       <main class="main">
         <header class="topbar">
           <div>
-            <h1 id="pageTitle">Painel</h1>
+            <h1 id="pageTitle">Admin</h1>
             <p id="pageSubtitle">Visão geral dos clientes e equipa.</p>
           </div>
           <div class="topbar-actions">
@@ -92,45 +91,6 @@
             <button class="primary-button" id="newRecordButton" type="button">Novo cliente</button>
           </div>
         </header>
-
-        <section class="dashboard view active" id="dashboardView">
-          <div class="metrics">
-            <article class="metric">
-              <span>Total de clientes</span>
-              <strong id="totalClients">0</strong>
-            </article>
-            <article class="metric">
-              <span>Clientes / Empresas</span>
-              <strong id="totalCompanies">0</strong>
-            </article>
-            <article class="metric">
-              <span>Colaboradores</span>
-              <strong id="totalUsers">0</strong>
-            </article>
-            <article class="metric">
-              <span>Férias pendentes</span>
-              <strong id="pendingVacations">0</strong>
-            </article>
-          </div>
-
-          <div class="content-grid">
-            <section class="panel">
-              <div class="panel-header">
-                <h2>Clientes recentes</h2>
-                <button class="text-button" data-view-jump="clients" type="button">Ver todos</button>
-              </div>
-              <div class="compact-list" id="recentClients"></div>
-            </section>
-
-            <section class="panel">
-              <div class="panel-header">
-                <h2>Férias para validar</h2>
-                <button class="text-button" data-view-jump="vacations" type="button">Ver férias</button>
-              </div>
-              <div class="compact-list" id="pendingVacationList"></div>
-            </section>
-          </div>
-        </section>
 
         <section class="view" id="adminPageView">
           <div class="role-hero">
@@ -404,7 +364,14 @@
               <thead>
                 <tr>
                   <th>Colaborador</th>
-                  <th>Periodo</th>
+                  <th>
+                    <span class="vacation-period-header">
+                      <span>Período</span>
+                      <button class="vacation-period-sort" id="vacationSortButton" type="button" title="Ordenar por data" aria-label="Ordenar por data">
+                        <span aria-hidden="true">↕</span>
+                      </button>
+                    </span>
+                  </th>
                   <th>Dias</th>
                   <th>Origem</th>
                   <th>Estado</th>

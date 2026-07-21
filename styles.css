@@ -1298,6 +1298,38 @@ p {
   padding: 10px 12px;
 }
 
+.vacation-period-header {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.vacation-period-sort {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0;
+  width: auto;
+  height: auto;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.72);
+  font-size: 1.05rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.vacation-period-sort[data-sort-mode="request"] {
+  color: rgba(255, 255, 255, 0.72);
+}
+
+.vacation-period-sort[data-sort-mode="date"] {
+  color: #ffffff;
+  text-shadow: 0 0 1px rgba(0, 0, 0, 0.35);
+}
+
 .field textarea {
   min-height: 92px;
   resize: vertical;

@@ -21,7 +21,9 @@ const demoData = {
   vacations: [],
   absences: [],
   notifications: [],
+  vacationSortOrder: "request",
   vacationMapOverrides: [],
+  vacationMapOverrideSeq: 0,
   vacationMapYear: new Date().getFullYear(),
   vacationMapDocument: {
     company: "Duomold - Fábrica de Moldes, Lda.",
@@ -159,7 +161,8 @@ const orderStatusOptions = [
 ];
 
 let state = loadState();
-let currentView = "adminPage";
+let currentView = state.currentView || defaultView();
+let vacationSortMode = "request";
 let dialogMode = "client";
 let editingId = null;
 let dialogAttachments = [];
@@ -178,7 +181,6 @@ let refreshingSupabase = false;
 let pendingSupabaseRefresh = false;
 
 const views = {
-  dashboard: qs("#dashboardView"),
   adminPage: qs("#adminPageView"),
   rhPage: qs("#rhPageView"),
   employeePage: qs("#employeePageView"),
@@ -193,8 +195,7 @@ const views = {
 };
 
 const titles = {
-  dashboard: ["Painel", "Visão geral dos clientes e equipa."],
-  adminPage: ["Admin", "Painel administrativo da DUOMOLD."],
+  adminPage: ["Admin", "Gestão administrativa da DUOMOLD."],
   rhPage: ["RH", "Gestão de férias, faltas e colaboradores."],
   employeePage: ["Funcionario", "Área pessoal para férias e faltas."],
   clients: ["Clientes / Empresas", "Cadastro unificado de clientes, empresas e acessos."],
@@ -319,7 +320,8 @@ const forms = {
     ["userId", "Colaborador", "user", true],
     ["date", "Data", "date", true],
     ["type", "Tipo", "select:Justificada|Injustificada|Baixa|Outro"],
-    ["compensateVacation", "Compensar como", "select:Compensar com 1 dia de férias|Compensar com banco de horas|Descontar do salário"],
+    ["compensateVacation", "Compensar como", "select:Compensar com 1 dia de férias|Compensar com banco de horas|Descontar do salário|Outro"],
+    ["compensateVacationOther", "Especificar", "text"],
     ["status", "Estado", "select:Pendente|Aprovado|Rejeitado"],
     ["reason", "Motivo", "textarea"],
     ["attachments", "Anexos", "attachments"]
@@ -486,6 +488,8 @@ function mergeState(saved) {
   }
   if (!Array.isArray(merged.notifications)) merged.notifications = [];
   if (!Array.isArray(merged.vacationMapOverrides)) merged.vacationMapOverrides = [];
+  merged.vacationMapOverrideSeq = Number(merged.vacationMapOverrideSeq || 0) || 0;
+  merged.vacationMapOverrides = mergeVacationMapOverrides([], merged.vacationMapOverrides);
   vacationMapYear = Number(merged.vacationMapYear || new Date().getFullYear()) || new Date().getFullYear();
   merged.vacationMapYear = vacationMapYear;
   merged.vacationMapDocument = {
@@ -499,6 +503,8 @@ function mergeState(saved) {
   merged.users = merged.users.map((user, index) => ({ ...user, employeeNumber: user.employeeNumber || `COL-${String(index + 1).padStart(3, "0")}` }));
   merged.vacations = cleanVacationRecords(merged.vacations, merged.users);
   merged.absences = cleanAbsenceRecords(merged.absences, merged.users);
+  const vacationMapOverrideSeqFromItems = Math.max(0, ...merged.vacationMapOverrides.map((item) => Number(item.mapSeq || 0) || 0));
+  merged.vacationMapOverrideSeq = Math.max(Number(merged.vacationMapOverrideSeq || 0) || 0, vacationMapOverrideSeqFromItems);
   const adminUser = merged.users.find((user) => user.id === "user-admin");
   if (adminUser) {
     if (!adminUser.email || adminUser.email === "admin@empresa.pt") adminUser.email = "sistemaduolmold@gmail.com";
@@ -559,6 +565,20 @@ function normalizeOrderText(order) {
       status: entry.status || "Falta"
     })).filter(isManualOrderHistoryEntry) : []
   };
+}
+
+function normalizeOrderProgress(value, fallback = "0") {
+  const raw = String(value ?? fallback).trim().replace("%", "").replace(",", ".");
+  const number = Number(raw);
+  if (!Number.isFinite(number)) return String(fallback || "0");
+  return String(Math.max(0, Math.min(100, number)));
+}
+
+function syncOrderProgress(order = {}) {
+  const progress = normalizeOrderProgress(order.progress ?? order.projectProgress ?? "0");
+  order.progress = progress;
+  order.projectProgress = progress;
+  return order;
 }
 
 function isManualOrderHistoryEntry(entry) {
@@ -639,7 +659,7 @@ async function loadStateFromSupabase({ persistRemoteSnapshot = true } = {}) {
       users: Array.isArray(remoteState?.users) && remoteState.users.length ? remoteState.users : state.users,
       vacations: Array.isArray(remoteState?.vacations) && remoteState.vacations.length ? remoteState.vacations : state.vacations,
       absences: Array.isArray(remoteState?.absences) && remoteState.absences.length ? remoteState.absences : state.absences,
-      vacationMapOverrides: Array.isArray(remoteState?.vacationMapOverrides) && remoteState.vacationMapOverrides.length ? remoteState.vacationMapOverrides : state.vacationMapOverrides
+      vacationMapOverrides: mergeVacationMapOverrides(state.vacationMapOverrides, remoteState?.vacationMapOverrides)
     };
     applyingRemoteState = true;
     state = mergeState(mergedRemoteState);
@@ -784,7 +804,7 @@ function role() {
 
 function allowedViews() {
   if (isClient()) return ["clientPortal", "profile"];
-  if (role() === "Admin") return ["adminPage", "dashboard", "profile", "clients", "orders", "users", "vacations", "absences"];
+  if (role() === "Admin") return ["adminPage", "profile", "clients", "orders", "users", "vacations", "absences"];
   if (role() === "RH") return ["rhPage", "profile", "users", "vacations", "absences"];
   return ["employeePage", "profile", "users", "vacations", "absences"];
 }
@@ -798,6 +818,8 @@ function defaultView() {
 
 function setView(view) {
   currentView = allowedViews().includes(view) ? view : defaultView();
+  state.currentView = currentView;
+  persistLocalState();
   Object.entries(views).forEach(([name, element]) => element?.classList.toggle("active", name === currentView));
   qsa(".nav-item").forEach((button) => {
     const roleLimit = button.dataset.roles ? button.dataset.roles.split(",").map((item) => item.trim()).filter(Boolean) : [];
@@ -819,7 +841,6 @@ function qsa(selector, scope = document) {
 function actionLabel() {
   return {
     adminPage: "Nova encomenda",
-    dashboard: "Novo cliente / empresa",
     clients: "Novo cliente / empresa",
     companies: "Nova empresa",
     orders: "Nova encomenda",
@@ -833,7 +854,7 @@ function actionLabel() {
 
 function canCreateHere() {
   if (isClient()) return false;
-  if (role() === "Admin") return ["adminPage", "dashboard", "clients", "orders", "users", "vacations", "absences"].includes(currentView);
+  if (role() === "Admin") return ["clients", "orders", "users", "vacations", "absences"].includes(currentView);
   if (role() === "RH") return ["rhPage", "vacations", "absences"].includes(currentView);
   return ["employeePage", "vacations", "absences"].includes(currentView);
 }
@@ -847,7 +868,7 @@ function canEditVacationMap() {
 }
 
 function modeFromView() {
-  return { adminPage: "order", dashboard: "client", clients: "client", orders: "order", users: "user", rhPage: "vacation", employeePage: "vacation", vacations: "vacation", absences: "absence" }[currentView] || "client";
+  return { adminPage: "order", clients: "client", orders: "order", users: "user", rhPage: "vacation", employeePage: "vacation", vacations: "vacation", absences: "absence" }[currentView] || "client";
 }
 
 function render() {
@@ -1223,7 +1244,7 @@ function mapOrderFromSupabase(row) {
     title: row.title || "",
     description: row.description || "",
     status: row.status || "Nota de encomenda recebida",
-    progress: String(row.progress ?? 0),
+    progress: String(row.progress ?? row.project_progress ?? 0),
     dueDate: row.due_date || "",
     weeklyUpdate: row.weekly_update || "",
     tasks: row.tasks || "",
@@ -1234,6 +1255,7 @@ function mapOrderFromSupabase(row) {
     planning: row.planning || undefined,
     moldPhotos: Array.isArray(row.mold_photos) ? row.mold_photos.map(normalizeMoldPhoto) : undefined
   });
+  syncOrderProgress(mapped);
   if (!hasPlanningFlag) delete mapped.showPlanningToClient;
   if (!hasScheduleFlag) delete mapped.showScheduleToClient;
   if (!hasHistory) delete mapped.history;
@@ -1254,6 +1276,7 @@ function mapVacationFromSupabase(row) {
     decidedBy: row.decided_by || userName(row.approved_by) || "",
     decidedById: row.approved_by || "",
     decidedAt: row.approved_at || "",
+    createdAt: row.created_at || row.createdAt || "",
     linkedAbsenceId: row.linked_absence_id || ""
   };
 }
@@ -1265,6 +1288,7 @@ function mapAbsenceFromSupabase(row) {
     date: row.date || "",
     type: row.type || "Justificada",
     compensateVacation: absenceCompensationMode(row.compensation_mode || (row.compensate_vacation ? "Compensar com 1 dia de férias" : "Descontar do salário")),
+    compensateVacationOther: row.compensation_other || "",
     status: row.status || "Pendente",
     reason: row.reason || "",
     decidedBy: row.decided_by || "",
@@ -1339,6 +1363,7 @@ function userToSupabase(user) {
 }
 
 function orderToSupabase(order) {
+  const normalizedProgress = normalizeOrderProgress(order.progress ?? order.projectProgress ?? "0");
   return {
     id: order.id,
     client_id: order.clientId || "",
@@ -1346,7 +1371,7 @@ function orderToSupabase(order) {
     title: order.title || "",
     description: order.description || "",
     status: order.status || "Nota de encomenda recebida",
-    progress: Number(order.progress || 0),
+    progress: Number(normalizedProgress),
     due_date: order.dueDate || null,
     weekly_update: order.weeklyUpdate || "",
     tasks: order.tasks || "",
@@ -1371,6 +1396,7 @@ function vacationToSupabase(vacation) {
     status: vacation.status || "Pendente",
     notes: vacation.notes || "",
     decided_by: vacation.decidedBy || "",
+    created_at: vacation.createdAt || null,
     linked_absence_id: vacation.linkedAbsenceId || null,
     approved_by: vacation.decidedById || null,
     approved_at: vacation.decidedAt || null
@@ -1378,13 +1404,15 @@ function vacationToSupabase(vacation) {
 }
 
 function absenceToSupabase(absence) {
+  const compensationMode = absenceCompensationMode(absence.compensateVacation);
   return {
     id: absence.id,
     user_id: absence.userId || "",
     date: absence.date || null,
     type: absence.type || "Justificada",
-    compensate_vacation: absenceCompensationMode(absence.compensateVacation) !== "Descontar do salário",
-    compensation_mode: absenceCompensationMode(absence.compensateVacation),
+    compensate_vacation: compensationMode !== "Descontar do salário",
+    compensation_mode: compensationMode,
+    compensation_other: compensationMode === "Outro" ? String(absence.compensateVacationOther || "").trim() : "",
     status: absence.status || "Pendente",
     reason: absence.reason || "",
     decided_by: absence.decidedBy || "",
@@ -1431,7 +1459,7 @@ function renderRolePages() {
   text("#adminClientLogins", state.clients.filter((client) => client.email && client.password).length);
   text("#adminPendingVacations", state.vacations.filter((item) => item.status === "Pendente").length);
   text("#adminPendingAbsences", state.absences.filter((item) => item.status === "Pendente").length);
-  compact("#adminOrdersList", openOrders, (order) => ({ title: `${order.reference} - ${clientName(order.clientId)}`, meta: `${order.status} - ${order.progress}%`, badge: date(order.dueDate) }));
+  compact("#adminOrdersList", openOrders, (order) => ({ title: `${order.reference} - ${clientName(order.clientId)}`, meta: `${order.status} - ${order.progress || order.projectProgress || "0"}%`, badge: date(order.dueDate) }));
   compact("#rhVacationsList", state.vacations.filter((item) => item.status === "Pendente"), (item) => ({ title: userName(item.userId), meta: `${date(item.startDate)} a ${date(item.endDate)}`, badge: `${item.days} dias` }));
   compact("#rhAbsencesList", state.absences.filter((item) => item.status === "Pendente"), (item) => ({ title: userName(item.userId), meta: item.reason || "Sem motivo", badge: item.type }));
   const employeeId = currentUser()?.id || "user-funcionario";
@@ -1490,7 +1518,7 @@ function renderOrders() {
       <td><strong>${esc(order.reference)}</strong><small>${esc(order.title)}</small></td>
       <td>${esc(clientName(order.clientId))}</td>
       <td><span class="status ${cls(order.status)}">${esc(order.status)}</span></td>
-      <td><strong>${esc(order.progress)}%</strong><small>Previsão: ${date(order.dueDate)}</small></td>
+      <td><strong>${esc(order.progress || order.projectProgress || "0")}%</strong><small>Previsão: ${date(order.dueDate)}</small></td>
       <td>${esc(order.weeklyUpdate || "Sem atualização")}</td>
       <td><div class="row-actions"><button class="row-action" data-edit-order="${esc(order.id)}" type="button">Editar</button><button class="row-action" data-planning-order="${esc(order.id)}" type="button">Planeamento</button><button class="row-action" data-schedule-order="${esc(order.id)}" type="button">Cronograma</button><button class="row-action delete" data-delete-order="${esc(order.id)}" type="button">Apagar</button></div></td>
     </tr>`);
@@ -1505,7 +1533,7 @@ function renderClientPortal() {
     <tr>
       <td><strong>${esc(order.reference)}</strong><small>${esc(order.title)}</small></td>
       <td><span class="status ${cls(order.status)}">${esc(clientPortalStatus(order.status))}</span></td>
-      <td><strong>${esc(order.progress)}%</strong><small>${esc(order.description || "")}</small></td>
+      <td><strong>${esc(order.progress || order.projectProgress || "0")}%</strong><small>${esc(order.description || "")}</small></td>
       <td>${date(order.dueDate)}</td>
       <td>${esc(order.weeklyUpdate || portalText.noWeeklyUpdate)}</td>
       <td><div class="row-actions">${clientDocumentButtons(order)}</div></td>
@@ -1902,7 +1930,31 @@ function renderUsers() {
 
 function renderVacations() {
   const query = value("#vacationSearch");
-  const rows = state.vacations.filter((item) => role() !== "Funcionario" || item.userId === currentUser()?.id).filter((item) => search([userName(item.userId), item.origin, item.status, item.notes], query));
+  const sortButton = qs("#vacationSortButton");
+  if (sortButton) {
+    const sortMode = vacationSortMode === "date" ? "date" : "request";
+    sortButton.dataset.sortMode = sortMode;
+    sortButton.title = sortMode === "request"
+      ? "Ordenar por data"
+      : "Voltar para ultimo pedido";
+    sortButton.setAttribute("aria-label", sortButton.title);
+  }
+  const rows = state.vacations
+    .filter((item) => role() !== "Funcionario" || item.userId === currentUser()?.id)
+    .filter((item) => search([userName(item.userId), item.origin, item.status, item.notes], query))
+    .sort((a, b) => {
+      const sortMode = vacationSortMode === "date" ? "date" : "request";
+      if (sortMode === "request") {
+        const requestDiff = vacationRequestTimestamp(b) - vacationRequestTimestamp(a);
+        if (requestDiff) return requestDiff;
+      } else {
+        const dateDiff = String(a.startDate || "").localeCompare(String(b.startDate || ""));
+        if (dateDiff) return dateDiff;
+        const requestDiff = vacationRequestTimestamp(a) - vacationRequestTimestamp(b);
+        if (requestDiff) return requestDiff;
+      }
+      return userName(a.userId).localeCompare(userName(b.userId), "pt");
+    });
   table("#vacationsTable", rows, (item) => `
     <tr>
       <td><strong>${esc(userName(item.userId))}</strong><small>${esc(item.notes || "Sem observacoes")}</small></td>
@@ -1915,6 +1967,13 @@ function renderVacations() {
   renderVacationMap();
 }
 
+function vacationRequestTimestamp(item = {}) {
+  const value = item.createdAt || item.created_at || item.decidedAt || item.decided_at || item.updatedAt || item.updated_at || item.approvedAt || item.approved_at || "";
+  const timestamp = new Date(value).getTime();
+  if (!Number.isNaN(timestamp) && timestamp > 0) return timestamp;
+  return 0;
+}
+
 function renderAbsences() {
   const query = value("#absenceSearch");
   const rows = state.absences.filter((item) => role() !== "Funcionario" || item.userId === currentUser()?.id).filter((item) => search([userName(item.userId), item.type, item.status, item.reason], query));
@@ -1924,8 +1983,8 @@ function renderAbsences() {
       <td>${date(item.date)}</td>
       <td>${esc(item.type)}</td>
       <td><span class="status ${cls(item.status)}">${esc(item.status)}</span></td>
-      <td><strong>${esc(absenceCompensationLabel(item.compensateVacation))}</strong><small>${esc(item.reason || "Sem motivo")}</small></td>
-      <td><div class="row-actions">${role() !== "Funcionario" ? `<button class="row-action" data-edit-absence="${item.id}">Editar</button><button class="row-action approve" data-approve-absence="${item.id}">Validar</button><button class="row-action delete" data-reject-absence="${item.id}">Rejeitar</button>` : ""}</div></td>
+      <td><strong>${esc(absenceCompensationLabel(item.compensateVacation, item.compensateVacationOther))}</strong><small>${esc(item.reason || "Sem motivo")}</small></td>
+      <td><div class="row-actions">${role() !== "Funcionario" ? `<button class="row-action" data-edit-absence="${item.id}">Editar</button><button class="row-action approve" data-approve-absence="${item.id}">Validar</button><button class="row-action delete" data-reject-absence="${item.id}">Rejeitar</button><button class="row-action delete" data-delete-absence="${item.id}">Eliminar</button>` : ""}</div></td>
     </tr>`);
 }
 
@@ -1967,7 +2026,7 @@ function buildVacationMapHtml() {
           <strong ${editable ? `contenteditable="true" data-vacation-doc-field="company"` : ""}>${esc(doc.company)}</strong>
           <small ${editable ? `contenteditable="true" data-vacation-doc-field="address"` : ""}>${esc(doc.address)}</small>
           <small>Local trabalho: <span ${editable ? `contenteditable="true" data-vacation-doc-field="workplace"` : ""}>${esc(doc.workplace)}</span></small>
-          ${editable ? `<small class="vacation-map-edit-hint">Admin/RH: clique nas células para preencher manualmente; clique nos textos para editar.</small>` : ""}
+          ${editable ? `<small class="vacation-map-edit-hint">Admin/RH: clique nos textos para editar.</small>` : ""}
         </div>
       </div>
       ${buildVacationLegendHtml()}
@@ -2074,16 +2133,22 @@ function vacationMapPeople(filters = vacationMapFilters(), records = [], extraUs
 
 function vacationMapCellInfo(userId, iso, monthRecords) {
   const item = latestVacationMapRecordForCell(userId, iso, monthRecords);
-  const override = vacationMapOverride(userId, iso);
+  const override = latestVacationMapOverride(state.vacationMapOverrides.filter((item) => item.userId === userId && item.date === iso));
   const specialDay = vacationMapSpecialDayInfo(iso);
   if (override) {
+    if (override.cleared) {
+      return { value: "", className: "", title: `${userName(userId)} - ${date(iso)}` };
+    }
     const overrideCode = normalizeVacationCode(override.code || item?.mapCode || item?.code || (item ? vacationCode(item, iso) : ""));
-    const legendColor = vacationMapLegendItems().find((legendItem) => normalizeVacationCode(legendItem.code) === overrideCode)?.color || "";
+    const legendItem = vacationMapLegendItems().find((legendItem) => legendItem.id === override.legendId)
+      || vacationMapLegendItems().find((legendItem) => normalizeVacationCode(legendItem.code) === overrideCode);
+    const overrideLabel = legendItem?.label || override.label || vacationCodeLabel(overrideCode) || overrideCode;
+    const legendColor = legendItem?.color || override.color || "";
     return {
       value: overrideCode,
       className: vacationMapClassForCode(overrideCode),
-      color: override.color || legendColor,
-      title: `${userName(userId)} - ${date(iso)} - Manual: ${overrideCode}${specialDay ? ` / ${specialDay.label}` : ""}`
+      color: legendColor,
+      title: `${userName(userId)} - ${date(iso)} - Manual: ${overrideLabel}${specialDay ? ` / ${specialDay.label}` : ""}`
     };
   }
   if (specialDay) {
@@ -2221,8 +2286,39 @@ function vacationMapClassForCode(code) {
   return "";
 }
 
-function vacationMapOverride(userId, iso) {
-  return state.vacationMapOverrides.find((item) => item.userId === userId && item.date === iso);
+function vacationMapOverrideKey(item = {}) {
+  return `${item.userId || ""}::${item.date || ""}`;
+}
+
+function vacationMapOverrideTimestamp(item = {}) {
+  if (Number.isFinite(Number(item.mapSeq))) return Number(item.mapSeq);
+  const value = item.updatedAt || item.updated_at || item.createdAt || item.created_at || item.approvedAt || item.approved_at || "";
+  const timestamp = new Date(value).getTime();
+  return Number.isNaN(timestamp) ? 0 : timestamp;
+}
+
+function latestVacationMapOverride(items = []) {
+  const list = Array.isArray(items) ? items.filter(Boolean) : [];
+  if (!list.length) return null;
+  return list.slice().sort((a, b) => vacationMapOverrideTimestamp(b) - vacationMapOverrideTimestamp(a))[0] || null;
+}
+
+function mergeVacationMapOverrides(localOverrides = [], remoteOverrides = []) {
+  const merged = new Map();
+  [...(Array.isArray(localOverrides) ? localOverrides : []), ...(Array.isArray(remoteOverrides) ? remoteOverrides : [])]
+    .filter((item) => item && item.userId && item.date)
+    .forEach((item) => {
+      const key = vacationMapOverrideKey(item);
+      const current = merged.get(key);
+      if (!current || vacationMapOverrideTimestamp(item) >= vacationMapOverrideTimestamp(current)) {
+        merged.set(key, { ...item });
+      }
+    });
+  return [...merged.values()].sort((a, b) => {
+    const dateDiff = String(a.date).localeCompare(String(b.date));
+    if (dateDiff) return dateDiff;
+    return String(a.userId).localeCompare(String(b.userId));
+  });
 }
 
 function buildVacationExcelMonthTable(monthName, monthIndex, records, options = {}) {
@@ -2325,7 +2421,7 @@ function editVacationMapCell(cell) {
   dialog.dataset.date = iso;
   text("#vacationCellDialogSubtitle", `${userName(userId)} - ${date(iso)}. Escolha uma opção da legenda.`);
   qs("#vacationCellOptions").innerHTML = `
-    ${vacationMapLegendItems().map((item) => `
+    ${vacationMapLegendItems().filter((item) => normalizeVacationCode(item.code) !== "F").map((item) => `
       <button class="vacation-cell-option" data-vacation-cell-option="${esc(item.id)}" type="button">
         <span style="background:${esc(item.color || "#ffffff")}">${esc(item.code || "")}</span>
         <strong>${esc(item.label)}</strong>
@@ -2343,18 +2439,18 @@ async function saveVacationMapCellSelection(legendId = "") {
   const userId = dialog.dataset.userId;
   const iso = dialog.dataset.date;
   const legendItem = vacationMapLegendItems().find((item) => item.id === legendId);
-  const previousOverrides = state.vacationMapOverrides;
+  const previousOverrides = structuredClone(state.vacationMapOverrides);
+  const previousSeq = Number(state.vacationMapOverrideSeq || 0) || 0;
   state.vacationMapOverrides = state.vacationMapOverrides.filter((item) => !(item.userId === userId && item.date === iso));
   if (legendItem) {
     const code = String(legendItem.code || "").toUpperCase();
-    if (["F", "M"].includes(code)) {
-      const admissionValidation = validateVacationAdmission(userId, iso);
-      if (!admissionValidation.ok) {
-        state.vacationMapOverrides = previousOverrides;
-        alert(admissionValidation.message);
-        return;
-      }
+    if (code === "F") {
+      state.vacationMapOverrides = previousOverrides;
+      state.vacationMapOverrideSeq = previousSeq;
+      alert("A opção F - Férias é colocada automaticamente a partir do pedido aprovado.");
+      return;
     }
+    state.vacationMapOverrideSeq = previousSeq + 1;
     state.vacationMapOverrides.push({
       userId,
       date: iso,
@@ -2362,19 +2458,31 @@ async function saveVacationMapCellSelection(legendId = "") {
       code: legendItem.code || "",
       color: legendItem.color || "#ffffff",
       label: legendItem.label || "",
+      mapSeq: state.vacationMapOverrideSeq,
+      updatedBy: currentUser()?.id || "",
+      updatedAt: new Date().toISOString()
+    });
+    if (code === "M" && vacationTotalMarkedDays(userId, Number(String(iso).slice(0, 4))) > adminVacationDays) {
+      state.vacationMapOverrides = previousOverrides;
+      state.vacationMapOverrideSeq = previousSeq;
+      alert(`Não é possível marcar mais férias. Este colaborador já atingiu o limite anual de ${adminVacationDays} dias.`);
+      return;
+    }
+  } else {
+    state.vacationMapOverrideSeq = previousSeq + 1;
+    state.vacationMapOverrides.push({
+      userId,
+      date: iso,
+      cleared: true,
+      mapSeq: state.vacationMapOverrideSeq,
       updatedBy: currentUser()?.id || "",
       updatedAt: new Date().toISOString()
     });
   }
-  if (vacationTotalMarkedDays(userId, Number(String(iso).slice(0, 4))) > adminVacationDays) {
-    state.vacationMapOverrides = previousOverrides;
-    alert(`Não é possível marcar mais férias. Este colaborador já atingiu o limite anual de ${adminVacationDays} dias.`);
-    return;
-  }
   dialog.close();
-  await syncVacationStateNow();
   renderUsers();
   renderVacationMap();
+  void syncVacationStateNow();
 }
 
 async function saveVacationMapDocumentField(target) {
@@ -2385,10 +2493,6 @@ async function saveVacationMapDocumentField(target) {
     doc[target.dataset.vacationDocField] = valueText;
     void syncVacationStateNow();
     return;
-  }
-  if (target.dataset.vacationLegendIndex !== undefined) {
-    doc.legend[target.dataset.vacationLegendIndex] = valueText;
-    void syncVacationStateNow();
   }
 }
 
@@ -2467,16 +2571,6 @@ function vacationMapTeams() {
   return [...new Set(state.users.map((user) => user.department || "").filter(Boolean))].sort((a, b) => a.localeCompare(b, "pt"));
 }
 
-function vacationMapSummary(records) {
-  return {
-    total: records.length,
-    f: records.filter((item) => vacationCode(item) === "F").length,
-    bh: records.filter((item) => vacationCode(item) === "BH").length,
-    dc: records.filter((item) => vacationCode(item) === "DC").length,
-    days: records.reduce((total, item) => total + Number(item.days || 0), 0)
-  };
-}
-
 function overlapsVacationYear(item) {
   const start = String(item.startDate || "");
   const end = String(item.endDate || "");
@@ -2531,6 +2625,7 @@ function openDialog(mode, id = null, defaults = {}) {
   qs("#formFields").innerHTML = mode === "order" ? `${fieldsHtml}${orderHistoryField(record || {})}` : fieldsHtml;
   qs("#recordDialog").showModal();
   setupDialogRules(mode);
+  if (mode === "absence") setupAbsenceRules();
 }
 
 function dialogTitle(mode, editing) {
@@ -2560,6 +2655,10 @@ function fieldHtml([name, labelText, type, required], record) {
     ? `<small class="field-help-text">${esc(vacationCodeHelp)}</small>`
     : "";
   if (type === "textarea") return `<label class="field full"><span>${labelText}</span><textarea name="${name}" ${req}>${esc(valueText)}</textarea></label>`;
+  if (name === "compensateVacationOther" && dialogMode === "absence") {
+    const showOther = String(record.compensateVacation || "").trim() === "Outro";
+    return `<label class="field full" data-compensation-other-field ${showOther ? "" : "hidden"}><span>${labelText}</span><input name="${name}" type="text" value="${esc(record.compensateVacationOther || "")}" placeholder="Escreva a opção personalizada" ${showOther ? "required" : ""}></label>`;
+  }
   if (type === "company") return selectField(name, labelText, state.companies.map((item) => [item.id, item.name]), valueText, req);
   if (type === "client") return selectField(name, labelText, state.clients.map((item) => [item.id, item.name]), valueText, req);
   if (type === "user") {
@@ -2818,6 +2917,11 @@ async function handleSubmit(event) {
     const wasEditingAbsence = Boolean(editingId);
     data.attachments = cloneAttachments(dialogAttachments);
     data.compensateVacation = absenceCompensationMode(data.compensateVacation);
+    data.compensateVacationOther = data.compensateVacation === "Outro" ? String(data.compensateVacationOther || "").trim() : "";
+    if (data.compensateVacation === "Outro" && !data.compensateVacationOther) {
+      qs("#formAlert").textContent = "Escreva a opção personalizada para o campo Compensar como.";
+      return;
+    }
     const existingCompensation = editingId && state.vacations.some((item) => item.linkedAbsenceId === editingId);
     const absenceYear = Number(String(data.date || today()).slice(0, 4));
     const allowance = vacationAllowance(data.userId, absenceYear);
@@ -2836,7 +2940,10 @@ async function handleSubmit(event) {
   let savedRecord = null;
   const previousRecord = editingId ? structuredClone(target.find((item) => item.id === editingId) || null) : null;
   const wasEditing = Boolean(editingId);
-  if (dialogMode === "order") applyOrderClientDocumentAccess(data);
+  if (dialogMode === "order") {
+    syncOrderProgress(data);
+    applyOrderClientDocumentAccess(data);
+  }
   if (editingId) {
     const index = target.findIndex((item) => item.id === editingId);
     target[index] = { ...target[index], ...data };
@@ -2846,6 +2953,7 @@ async function handleSubmit(event) {
     target.push(savedRecord);
   }
   if (dialogMode === "order") {
+    syncOrderProgress(savedRecord);
     applyOrderHistory(savedRecord, previousRecord, data.historyDate || today(), String(data.historyNote || "").trim(), wasEditing);
     delete savedRecord.historyDate;
     delete savedRecord.historyNote;
@@ -3062,6 +3170,25 @@ function setupDialogRules(mode) {
   update();
 }
 
+function setupAbsenceRules() {
+  const form = qs("#recordForm");
+  if (!form) return;
+  const select = form.elements.compensateVacation;
+  const otherField = form.querySelector("[data-compensation-other-field]");
+  const otherInput = form.elements.compensateVacationOther;
+  if (!select || !otherField || !otherInput) return;
+
+  const updateOtherField = () => {
+    const showOther = String(select.value || "").trim() === "Outro";
+    otherField.hidden = !showOther;
+    otherInput.required = showOther;
+    if (!showOther) otherInput.value = "";
+  };
+
+  select.addEventListener("change", updateOtherField);
+  updateOtherField();
+}
+
 function updateVacationCalculation() {
   const form = qs("#recordForm");
   if (dialogMode !== "vacation" || !form) return;
@@ -3165,20 +3292,22 @@ function normalizeVacationCode(code = "") {
   return valueText;
 }
 
-function absenceCompensationLabel(value) {
-  return absenceCompensationMode(value);
+function absenceCompensationLabel(value, other = "") {
+  const mode = absenceCompensationMode(value);
+  if (mode === "Outro") return other ? `Outro: ${other}` : "Outro";
+  return mode;
 }
 
 function absenceCompensationMode(value) {
   if (value === true) return "Compensar com 1 dia de férias";
   if (value === false || value === null || value === undefined) return "Descontar do salário";
   const normalized = String(value || "").trim();
-  if (["Compensar com 1 dia de férias", "Compensar com banco de horas", "Descontar do salário"].includes(normalized)) return normalized;
+  if (["Compensar com 1 dia de férias", "Compensar com banco de horas", "Descontar do salário", "Outro"].includes(normalized)) return normalized;
   if (normalized === "Sim") return "Compensar com 1 dia de férias";
   if (normalized === "Não" || normalized === "Nao") return "Descontar do salário";
   if (normalized === "true") return "Compensar com 1 dia de férias";
   if (normalized === "false") return "Descontar do salário";
-  return "Descontar do salário";
+  return normalized || "Descontar do salário";
 }
 
 function absenceCompensationCode(value) {
@@ -3296,6 +3425,7 @@ function syncApprovedAdminVacationToMap(vacation) {
   const label = legendItem?.label || vacationCodeLabel(code) || code;
   businessDayDates(vacation.startDate, vacation.endDate).forEach((iso) => {
     state.vacationMapOverrides = state.vacationMapOverrides.filter((item) => !(item.userId === vacation.userId && item.date === iso && item.sourceVacationId === vacation.id));
+    state.vacationMapOverrideSeq = Number(state.vacationMapOverrideSeq || 0) + 1;
     state.vacationMapOverrides.push({
       userId: vacation.userId,
       date: iso,
@@ -3303,6 +3433,7 @@ function syncApprovedAdminVacationToMap(vacation) {
       code,
       color,
       label,
+      mapSeq: state.vacationMapOverrideSeq,
       updatedBy: currentUser()?.id || "",
       updatedAt: new Date().toISOString(),
       sourceVacationId: vacation.id
@@ -3407,7 +3538,7 @@ function collection(mode) {
 function defaultRecord(mode) {
   if (mode === "order") return { clientId: state.clients[0]?.id, status: "Nota de encomenda recebida", progress: "0", clientDocumentAccess: "Cronograma", showPlanningToClient: "Não", showScheduleToClient: "Sim", history: [] };
   if (mode === "vacation") return { userId: currentUser()?.id || "user-funcionario", origin: role() === "Funcionario" ? "Funcionario" : "Admin/RH", status: role() === "Funcionario" ? "Pendente" : "Aprovado" };
-  if (mode === "absence") return { userId: currentUser()?.id || "user-funcionario", type: "Justificada", compensateVacation: "Descontar do salário", status: "Pendente" };
+  if (mode === "absence") return { userId: currentUser()?.id || "user-funcionario", type: "Justificada", compensateVacation: "Descontar do salário", compensateVacationOther: "", status: "Pendente" };
   if (mode === "user") return { employeeNumber: `COL-${String(state.users.length + 1).padStart(3, "0")}`, admissionDate: "", role: "Funcionario", status: "Ativo" };
   if (mode === "client") return { companyName: "", status: "Ativo", password: "cliente123", portalDocument: "Cronograma", portalLanguage: "Português" };
   return {};
@@ -3423,6 +3554,7 @@ async function deleteRecord(mode, id) {
   const key = { client: "clients", company: "companies", order: "orders", user: "users", vacation: "vacations", absence: "absences" }[mode];
   const previousRecords = state[key];
   const previousOverrides = mode === "vacation" ? [...state.vacationMapOverrides] : null;
+  const previousLinkedVacations = mode === "absence" ? state.vacations.filter((item) => item.linkedAbsenceId === id) : [];
   state[key] = state[key].filter((item) => item.id !== id);
   if (mode === "vacation") removeVacationFormOverrides(id);
   if (mode === "absence") state.vacations = state.vacations.filter((item) => item.linkedAbsenceId !== id);
@@ -3430,10 +3562,14 @@ async function deleteRecord(mode, id) {
   const deleted = await deleteSupabaseRecord(tableName, id);
   if (!deleted) {
     state[key] = previousRecords;
+    if (mode === "absence") state.vacations = [...state.vacations, ...previousLinkedVacations];
     if (mode === "vacation" && previousOverrides) state.vacationMapOverrides = previousOverrides;
     alert(`Não foi possível apagar ${label(mode)} na base de dados. Confirme as permissões do Supabase e tente novamente.`);
     render();
     return;
+  }
+  if (mode === "absence") {
+    await Promise.all(previousLinkedVacations.map((item) => deleteSupabaseRecord("vacations", item.id)));
   }
   if (mode === "client" && state.clientPortalPreferences) delete state.clientPortalPreferences[id];
   saveState();
@@ -4408,7 +4544,7 @@ function scheduleHtml(order, readonly) {
           <div class="schedule-cell-sub">${esc("Project percentage:")}</div>
           <div class="schedule-progress-row">
             <div class="schedule-progress-value">
-              <input class="schedule-progress-input" data-schedule="projectProgress" value="${value("projectProgress", order.progress || "0")}" ${disabled}>
+              <input class="schedule-progress-input" data-schedule="projectProgress" value="${value("projectProgress", order.progress || order.projectProgress || "0")}" ${disabled}>
               <span>%</span>
             </div>
           </div>
@@ -4468,6 +4604,10 @@ function saveSchedule() {
     const key = field.dataset.schedule;
     order.schedule[key] = field.type === "checkbox" || field.type === "radio" ? field.checked : field.value;
   });
+  syncOrderProgress(order);
+  if (Object.prototype.hasOwnProperty.call(order.schedule, "projectProgress")) {
+    order.schedule.projectProgress = order.progress;
+  }
   if (!order.schedule.moldNumber) order.schedule.moldNumber = order.reference;
   persistStateOnly();
   scheduleOrderClientNotification(order);
@@ -5590,6 +5730,10 @@ qsa(".nav-item").forEach((button) => button.addEventListener("click", () => {
   }
 }));
 qsa("[data-view-jump]").forEach((button) => button.addEventListener("click", () => setView(button.dataset.viewJump)));
+qs("#vacationSortButton")?.addEventListener("click", () => {
+  vacationSortMode = vacationSortMode === "date" ? "request" : "date";
+  renderVacations();
+});
 qs("#demoAccountSelect").addEventListener("change", (event) => {
   if (!adminSessionAccount) return;
   state.activeAccount = event.target.value;
@@ -5697,7 +5841,7 @@ document.addEventListener("click", (event) => {
     ["edit-company", "company", openDialog], ["delete-company", "company", deleteRecord],
     ["edit-order", "order", openDialog], ["delete-order", "order", deleteRecord],
     ["edit-user", "user", openDialog], ["delete-user", "user", deleteRecord],
-    ["edit-vacation", "vacation", openDialog], ["delete-vacation", "vacation", deleteRecord], ["edit-absence", "absence", openDialog]
+    ["edit-vacation", "vacation", openDialog], ["delete-vacation", "vacation", deleteRecord], ["edit-absence", "absence", openDialog], ["delete-absence", "absence", deleteRecord]
   ].find(([key]) => target.closest(`[data-${key}]`));
   if (action) {
     const [key, mode, fn] = action;
@@ -6460,7 +6604,7 @@ function exportSchedule() {
     [labels.moldNumber, data.moldNumber || order.reference || ""],
     [labels.customerMoldNumber, data.customerMoldNumber || ""],
     [labels.week, data.week || ""],
-    [labels.projectProgress, `${order.progress || "0"}%`]
+    [labels.projectProgress, `${order.progress || order.projectProgress || "0"}%`]
   ], margin, 24);
 
   const body = scheduleOperations.map((op, rowIndex) => {
@@ -6720,7 +6864,7 @@ function toDatasetKey(key) {
 }
 
 initSupabase();
-setView(defaultView());
+setView(currentView);
 render();
 loadStateFromSupabase();
 setupSupabaseRealtimeSync();
