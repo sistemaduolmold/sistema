@@ -29,6 +29,24 @@ Para evitar o aviso de segurança do Windows ao descarregar imagens, o botão `D
 
 O ficheiro `supabase-schema.sql` cria apenas a tabela simples de sincronizacao da versao atual do HTML. Use o `supabase-full-schema.sql` para criar o projeto inteiro.
 
+## Email de notificacoes
+
+A aplicacao tenta enviar as notificacoes de ferias e faltas pela rota `api/send-notification-email` quando estiver publicada no Vercel.
+
+Se o site esta no Vercel, este e o caminho recomendado:
+
+1. No painel do Vercel, vai a `Project Settings` > `Environment Variables`.
+2. Adiciona `RESEND_API_KEY` com a tua chave do Resend.
+3. Adiciona `EMAIL_FROM` com um remetente do teu dominio, por exemplo `DUOMOLD <noreply@seu-dominio.pt>`.
+4. Faz um novo deploy no Vercel para as variaveis entrarem em vigor.
+5. Garante que o dominio de envio esta verificado no Resend com SPF/DKIM.
+
+Se a rota do Vercel nao estiver disponivel, a app continua a funcionar com o fallback `mailto:` do navegador.
+
+Tambem foi criado o ficheiro `vercel-email-setup.ps1` com os comandos e notas de configuracao para este fluxo.
+
+Para testar sem dominio proprio, podes definir `EMAIL_TEST_TO` no Vercel com o teu email. Nesse modo, todos os emails do sistema vao para esse endereco de teste.
+
 ## O que inclui
 
 - Login com email e senha.

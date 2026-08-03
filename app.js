@@ -1635,6 +1635,72 @@ function notifyMany(targets, payload) {
   [...new Set(targets.filter(Boolean))].forEach((to) => addNotification({ ...payload, to }));
 }
 
+async function sendEmailNotification(recipients, subject, body) {
+  const uniqueRecipients = [...new Set((Array.isArray(recipients) ? recipients : []).map((email) => String(email || "").trim()).filter(Boolean))];
+  if (!uniqueRecipients.length) return false;
+  try {
+    const response = await fetch("/api/send-notification-email", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        to: uniqueRecipients,
+        subject: subject || "",
+        text: body || ""
+      })
+    });
+    if (response.ok) return true;
+    console.warn("Nao foi possivel enviar o email pela API do Vercel.", await response.text().catch(() => ""));
+  } catch (error) {
+    console.warn("API de email do Vercel indisponivel.", error);
+  }
+  const config = window.DUOMOLD_SUPABASE || {};
+  const functionName = String(config.emailFunction || "").trim();
+  if (functionName && config.url && config.anonKey) {
+    try {
+      const response = await fetch(`${config.url}/functions/v1/${functionName}`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          apikey: config.anonKey,
+          Authorization: `Bearer ${config.anonKey}`
+        },
+        body: JSON.stringify({
+          to: uniqueRecipients,
+          subject: subject || "",
+          text: body || ""
+        })
+      });
+      if (response.ok) return true;
+      console.warn("Nao foi possivel enviar o email pela Edge Function.", await response.text().catch(() => ""));
+    } catch (error) {
+      console.warn("Edge Function de email indisponivel.", error);
+    }
+  }
+  const mailto = `mailto:${uniqueRecipients.join(",")}?subject=${encodeURIComponent(subject || "")}&body=${encodeURIComponent(body || "")}`;
+  setTimeout(() => {
+    window.location.href = mailto;
+  }, 150);
+  return true;
+}
+
+function emailRecipientsForTargets(targets) {
+  const recipients = [];
+  (Array.isArray(targets) ? targets : []).forEach((target) => {
+    const [kind, value] = String(target || "").split(":");
+    if (kind === "user") {
+      const email = userEmail(value);
+      if (email) recipients.push(email);
+      return;
+    }
+    if (kind === "role") {
+      state.users
+        .filter((user) => user.role === value && user.email)
+        .forEach((user) => recipients.push(String(user.email || "").trim()));
+    }
+  });
+  return [...new Set(recipients.filter(Boolean))];
+}
+
 function managerNotificationTargets(requestUserId = "") {
   const requester = state.users.find((user) => user.id === requestUserId);
   const requesterRole = requester?.role;
@@ -2971,6 +3037,36 @@ async function handleSubmit(event) {
   }
   if (dialogMode === "order") notifyOrderChange(savedRecord, wasEditing);
   if (dialogMode === "vacation" && !wasEditing) notifyVacationRequest(savedRecord);
+  if (["vacation", "absence"].includes(dialogMode) && savedRecord?.status && savedRecord.status !== "Pendente") {
+    const previousStatus = previousRecord?.status || "";
+    if (previousStatus !== savedRecord.status) {
+      const recipient = userEmail(savedRecord.userId);
+      if (recipient) {
+        const recordLabel = dialogMode === "vacation" ? "férias" : "falta";
+        const statusLabel = String(savedRecord.status || "").toLowerCase();
+        const subject = `${recordLabel[0].toUpperCase() + recordLabel.slice(1)} ${statusLabel}`;
+        const periodText = dialogMode === "vacation"
+          ? `Período: ${date(savedRecord.startDate)} a ${date(savedRecord.endDate)}`
+          : `Data: ${date(savedRecord.date)}`;
+        const extraText = dialogMode === "vacation"
+          ? `Dias úteis: ${savedRecord.days || ""}`
+          : `Tipo: ${savedRecord.type || "Sem tipo"}`;
+        const body = [
+          "Olá,",
+          "",
+          `O seu pedido de ${recordLabel} foi ${statusLabel} por ${currentUser()?.name || "Admin/RH"}.`,
+          "",
+          periodText,
+          extraText,
+          "",
+          "Pode consultar o estado atualizado no sistema DUOMOLD.",
+          "",
+          "Sistema DUOMOLD"
+        ].filter(Boolean).join("\n");
+        void sendEmailNotification([recipient], subject, body);
+      }
+    }
+  }
   if (dialogMode === "vacation") syncApprovedAdminVacationToMap(savedRecord);
   qs("#recordDialog").close();
   saveState();
@@ -3095,16 +3191,15 @@ function handlePasswordSubmit(event) {
 function notifyVacationRequest(vacation) {
   if (!vacation || vacation.status !== "Pendente") return;
   const employee = userName(vacation.userId);
-  notifyMany(managerNotificationTargets(vacation.userId), {
+  const managerTargets = managerNotificationTargets(vacation.userId);
+  notifyMany(managerTargets, {
     title: "Novo pedido de férias",
     message: `${employee} pediu férias de ${date(vacation.startDate)} a ${date(vacation.endDate)}.`,
     link: "vacations",
     recordType: "vacation",
     recordId: vacation.id
   });
-  const recipients = state.users
-    .filter((user) => managerNotificationTargets(vacation.userId).includes(`role:${user.role}`) && user.email)
-    .map((user) => user.email);
+  const recipients = emailRecipientsForTargets(managerTargets);
   if (!recipients.length) return;
   const subject = `Pedido de férias pendente - ${employee}`;
   const body = [
@@ -3122,22 +3217,39 @@ function notifyVacationRequest(vacation) {
     "",
     "Sistema DUOMOLD"
   ].filter(Boolean).join("\n");
-  const mailto = `mailto:${recipients.join(",")}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
-  setTimeout(() => {
-    window.location.href = mailto;
-  }, 150);
+  void sendEmailNotification(recipients, subject, body);
 }
 
 function notifyAbsenceRequest(absence) {
   if (!absence || absence.status !== "Pendente") return;
   const employee = userName(absence.userId);
-  notifyMany(managerNotificationTargets(absence.userId), {
+  const managerTargets = managerNotificationTargets(absence.userId);
+  notifyMany(managerTargets, {
     title: "Nova falta pendente",
     message: `${employee} registou falta em ${date(absence.date)}.`,
     link: "absences",
     recordType: "absence",
     recordId: absence.id
   });
+  const recipients = emailRecipientsForTargets(managerTargets);
+  if (!recipients.length) return;
+  const subject = `Nova falta pendente - ${employee}`;
+  const body = [
+    "Olá,",
+    "",
+    "Existe uma nova falta pendente no sistema DUOMOLD.",
+    "",
+    `Colaborador: ${employee}`,
+    `Data: ${date(absence.date)}`,
+    `Tipo: ${absence.type || "Sem tipo"}`,
+    `Estado: ${absence.status}`,
+    absence.reason ? `Motivo: ${absence.reason}` : "",
+    "",
+    "Por favor, aceda ao sistema para validar o pedido em Faltas.",
+    "",
+    "Sistema DUOMOLD"
+  ].filter(Boolean).join("\n");
+  void sendEmailNotification(recipients, subject, body);
 }
 
 function notifyOrderChange(order, wasEditing) {
@@ -3628,6 +3740,30 @@ async function approve(mode, id, status) {
     recordType: "absence",
     recordId: item.id
   });
+  const recipient = userEmail(item.userId);
+  if (recipient) {
+    const recordLabel = mode === "vacation" ? "férias" : "falta";
+    const subject = `${recordLabel[0].toUpperCase() + recordLabel.slice(1)} ${status.toLowerCase()}`;
+    const periodText = mode === "vacation"
+      ? `Período: ${date(item.startDate)} a ${date(item.endDate)}`
+      : `Data: ${date(item.date)}`;
+    const extraText = mode === "vacation"
+      ? `Dias úteis: ${item.days || ""}`
+      : `Tipo: ${item.type || "Sem tipo"}`;
+    const body = [
+      "Olá,",
+      "",
+      `O seu pedido de ${recordLabel} foi ${status.toLowerCase()} por ${currentUser()?.name || "Admin/RH"}.`,
+      "",
+      periodText,
+      extraText,
+      "",
+      "Pode consultar o estado atualizado no sistema DUOMOLD.",
+      "",
+      "Sistema DUOMOLD"
+    ].filter(Boolean).join("\n");
+    void sendEmailNotification([recipient], subject, body);
+  }
   if (mode === "vacation") syncApprovedAdminVacationToMap(item);
   saveState();
   if (mode === "vacation") {
@@ -5729,6 +5865,10 @@ function clientName(id) {
 
 function userName(id) {
   return state.users.find((item) => item.id === id)?.name || "Sem colaborador";
+}
+
+function userEmail(id) {
+  return String(state.users.find((item) => item.id === id)?.email || "").trim();
 }
 
 function date(valueText) {
