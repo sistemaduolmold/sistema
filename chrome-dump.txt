@@ -1,0 +1,260 @@
+<!DOCTYPE html>
+<html lang="pt"><head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Document Open Diagnostic</title>
+    <style>
+      body {
+        font-family: Arial, Helvetica, sans-serif;
+        margin: 0;
+        padding: 24px;
+        background: #f4f4f5;
+        color: #111827;
+      }
+      h1 {
+        margin: 0 0 16px;
+        font-size: 24px;
+      }
+      pre {
+        white-space: pre-wrap;
+        background: #fff;
+        border: 1px solid #d1d5db;
+        border-radius: 8px;
+        padding: 16px;
+      }
+      iframe {
+        width: 1px;
+        height: 1px;
+        opacity: 0;
+        border: 0;
+        position: absolute;
+        pointer-events: none;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Diagnostic</h1>
+    <pre id="result">{
+  "loginAlert": "",
+  "appVisible": true,
+  "orderRows": 1,
+  "clientRows": 1,
+  "before": {
+    "planningDialogOpen": false,
+    "scheduleDialogOpen": false
+  },
+  "afterPlanning": {
+    "buttonFound": true,
+    "dialogOpen": true,
+    "bodyHasContent": true,
+    "title": "Planeamento - DM999"
+  },
+  "afterSchedule": {
+    "buttonFound": true,
+    "dialogOpen": true,
+    "bodyHasContent": true,
+    "title": "Cronograma - DM999"
+  },
+  "clientResult": {
+    "account": "client:client-test",
+    "buttonFound": true,
+    "planningOpen": true,
+    "scheduleOpen": true,
+    "alerts": []
+  },
+  "alerts": [],
+  "errors": [],
+  "warns": []
+}</pre>
+    <iframe id="appFrame" title="app" src="index.html"></iframe>
+    <script>
+      const storageKey = "duomold-demo-v3";
+      const resultEl = document.getElementById("result");
+      const frame = document.getElementById("appFrame");
+
+      function logResult(payload) {
+        resultEl.textContent = JSON.stringify(payload, null, 2);
+      }
+
+      function wait(ms) {
+        return new Promise((resolve) => setTimeout(resolve, ms));
+      }
+
+      async function run() {
+        const seedState = {
+          activeAccount: "user:user-admin",
+          companies: [],
+          clients: [
+            {
+              id: "client-test",
+              companyId: "company-test",
+              name: "Cliente Teste",
+              email: "cliente@teste.pt",
+              password: "cliente123",
+              phone: "",
+              role: "",
+              owner: "Admin",
+              portalDocument: "Cronograma",
+              portalLanguage: "Português",
+              status: "Ativo",
+              notes: ""
+            }
+          ],
+          clientPortalPreferences: {},
+          users: [
+            { id: "user-admin", employeeNumber: "ADM-001", name: "Administrador", email: "sistemaduolmold@gmail.com", password: "Admin123!", phone: "", admissionDate: "2025-01-01", role: "Admin", department: "", position: "", status: "Ativo" },
+            { id: "user-rh", employeeNumber: "RH-001", name: "Recursos Humanos", email: "rh@empresa.pt", password: "rh123", phone: "", admissionDate: "2025-01-01", role: "RH", department: "", position: "", status: "Ativo" },
+            { id: "user-funcionario", employeeNumber: "COL-001", name: "Joao Ferreira", email: "joao@empresa.pt", password: "funcionario123", phone: "", admissionDate: "2025-01-01", role: "Funcionario", department: "", position: "", status: "Ativo" }
+          ],
+          orders: [
+            {
+              id: "order-test",
+              clientId: "client-test",
+              reference: "DM999",
+              title: "Encomenda de teste",
+              description: "Diagnóstico",
+              status: "Em produção",
+              progress: "30",
+              dueDate: "2026-07-10",
+              weeklyUpdate: "Semanal",
+              tasks: "",
+              clientDocumentAccess: "Ambos",
+              showPlanningToClient: "Sim",
+              showScheduleToClient: "Sim",
+              history: [],
+              schedule: { moldNumber: "DM999", week: "23", remarks: "cronograma teste" },
+              planning: {
+                projeto: "DM999",
+                cliente: "Cliente Teste",
+                molde: "M-999",
+                data: "2026-06-03",
+                observacoes: "planeamento teste",
+                campos: [],
+                linhas: [
+                  { id: 1, nome: "Tarefa teste", duracao: "5 dias", inicio: "2026-06-03", conclusao: "2026-06-08", tipo: "Tarefa", status: "0%", statusByDate: { "2026-06-03": "0%" }, extras: [] }
+                ]
+              },
+              moldPhotos: []
+            }
+          ],
+          vacations: [],
+          absences: [],
+          notifications: [],
+          vacationMapOverrides: [],
+          vacationMapDocument: {
+            company: "Duomold - Fábrica de Moldes, Lda.",
+            address: "",
+            workplace: "Global",
+            legend: {}
+          }
+        };
+        frame.contentWindow.localStorage.setItem(storageKey, JSON.stringify(seedState));
+        frame.src = "index.html";
+
+        await new Promise((resolve, reject) => {
+          frame.addEventListener("load", resolve, { once: true });
+          frame.addEventListener("error", () => reject(new Error("Falha a carregar a app.")), { once: true });
+        });
+
+        const win = frame.contentWindow;
+        const doc = win.document;
+        const alerts = [];
+        const errors = [];
+        const warns = [];
+        const originalAlert = win.alert.bind(win);
+        const originalError = win.console.error.bind(win.console);
+        const originalWarn = win.console.warn.bind(win.console);
+
+        win.alert = (message) => {
+          alerts.push(String(message));
+        };
+        win.console.error = (...args) => {
+          errors.push(args.map((item) => String(item)).join(" "));
+          originalError(...args);
+        };
+        win.console.warn = (...args) => {
+          warns.push(args.map((item) => String(item)).join(" "));
+          originalWarn(...args);
+        };
+        win.addEventListener("error", (event) => {
+          errors.push(`${event.message} @ ${event.filename}:${event.lineno}`);
+        });
+
+        doc.getElementById("loginEmail").value = "sistemaduolmold@gmail.com";
+        doc.getElementById("loginPassword").value = "Admin123!";
+        doc.getElementById("loginForm").dispatchEvent(new win.Event("submit", { bubbles: true, cancelable: true }));
+        await wait(2500);
+
+        doc.querySelector('[data-view="orders"]')?.click();
+        await wait(800);
+
+        const planningButton = doc.querySelector("[data-planning-order]");
+        const scheduleButton = doc.querySelector("[data-schedule-order]");
+        const before = {
+          planningDialogOpen: !!doc.getElementById("planningDialog")?.open,
+          scheduleDialogOpen: !!doc.getElementById("scheduleDialog")?.open
+        };
+
+        if (planningButton) planningButton.click();
+        await wait(800);
+        const afterPlanning = {
+          buttonFound: !!planningButton,
+          dialogOpen: !!doc.getElementById("planningDialog")?.open,
+          bodyHasContent: !!doc.getElementById("planningBody")?.textContent.trim(),
+          title: doc.getElementById("planningDialogTitle")?.textContent || ""
+        };
+
+        doc.getElementById("closePlanningButton")?.click();
+        await wait(400);
+
+        if (scheduleButton) scheduleButton.click();
+        await wait(800);
+        const afterSchedule = {
+          buttonFound: !!scheduleButton,
+          dialogOpen: !!doc.getElementById("scheduleDialog")?.open,
+          bodyHasContent: !!doc.getElementById("scheduleBody")?.textContent.trim(),
+          title: doc.getElementById("scheduleDialogTitle")?.textContent || ""
+        };
+
+        const clientOption = [...doc.getElementById("demoAccountSelect").options].find((option) => option.value.startsWith("client:"));
+        let clientResult = null;
+        if (clientOption) {
+          doc.getElementById("demoAccountSelect").value = clientOption.value;
+          doc.getElementById("demoAccountSelect").dispatchEvent(new win.Event("change", { bubbles: true }));
+          await wait(800);
+          const clientButton = doc.querySelector("[data-schedule-order], [data-planning-order]");
+          if (clientButton) clientButton.click();
+          await wait(800);
+          clientResult = {
+            account: clientOption.value,
+            buttonFound: !!clientButton,
+            planningOpen: !!doc.getElementById("planningDialog")?.open,
+            scheduleOpen: !!doc.getElementById("scheduleDialog")?.open,
+            alerts
+          };
+        }
+
+        logResult({
+          loginAlert: doc.getElementById("loginAlert")?.textContent || "",
+          appVisible: !doc.getElementById("appShell")?.hidden,
+          orderRows: doc.querySelectorAll("#ordersTable tr").length,
+          clientRows: doc.querySelectorAll("#clientOrdersTable tr").length,
+          before,
+          afterPlanning,
+          afterSchedule,
+          clientResult,
+          alerts,
+          errors,
+          warns
+        });
+
+        win.alert = originalAlert;
+      }
+
+      run().catch((error) => {
+        logResult({ fatal: error.message, stack: error.stack });
+      });
+    </script>
+  
+
+</body></html>
