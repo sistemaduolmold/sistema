@@ -170,6 +170,7 @@ let editingId = null;
 let dialogAttachments = [];
 let activePayslipUserId = "";
 let payslipUploading = false;
+const deletingPayslipIds = new Set();
 let isLoggedIn = Boolean(state.sessionRemembered);
 let adminSessionAccount = currentUser()?.role === "Admin" ? state.activeAccount : "";
 let supabaseClient = null;
@@ -2122,16 +2123,19 @@ function renderPayslipList() {
     .filter((item) => String(item.userId) === activePayslipUserId)
     .sort((a, b) => String(b.period || b.uploadedAt).localeCompare(String(a.period || a.uploadedAt)));
   qs("#payslipList").innerHTML = records.length ? records.map((item) => `
-    <label class="payslip-item">
-      <input type="checkbox" data-payslip-select value="${esc(item.id)}">
+    <div class="payslip-item">
+      <input type="checkbox" data-payslip-select value="${esc(item.id)}" aria-label="Selecionar ${esc(item.fileName)}">
       <span class="payslip-file-icon">PDF</span>
       <span class="payslip-item-info">
         <strong>${esc(payslipPeriodLabel(item.period))}</strong>
         <small>${esc(item.fileName)} · ${esc(formatFileSize(item.fileSize))}</small>
         <small>${item.sentAt ? `Enviado em ${dateTime(item.sentAt)}` : "Ainda não enviado"}</small>
       </span>
-      <button class="text-button" data-open-payslip="${esc(item.id)}" type="button">Abrir</button>
-    </label>`).join("") : `<div class="payslip-empty-state"><span class="payslip-empty-icon">PDF</span><strong>Ainda não existem recibos</strong><small>Adicione o primeiro documento deste colaborador.</small></div>`;
+      <div class="payslip-item-actions">
+        <button class="text-button" data-open-payslip="${esc(item.id)}" type="button">Abrir</button>
+        ${canManageUsers() ? `<button class="text-button" data-delete-payslip="${esc(item.id)}" type="button" ${deletingPayslipIds.has(String(item.id)) ? "disabled" : ""}>${deletingPayslipIds.has(String(item.id)) ? "A eliminar..." : "Eliminar"}</button>` : ""}
+      </div>
+    </div>`).join("") : `<div class="payslip-empty-state"><span class="payslip-empty-icon">PDF</span><strong>Ainda não existem recibos</strong><small>Adicione o primeiro documento deste colaborador.</small></div>`;
 }
 
 function payslipPeriodLabel(period) {
@@ -2206,6 +2210,45 @@ async function uploadPayslip(event) {
       : "Não foi possível guardar o recibo. Tente novamente.";
   } finally {
     payslipUploading = false;
+  }
+}
+
+async function deletePayslip(id, button) {
+  const record = state.payslips.find((item) => String(item.id) === String(id));
+  if (!canManageUsers() || !supabaseClient || !record || String(record.userId) !== activePayslipUserId || deletingPayslipIds.has(String(id))) return;
+  if (!confirm(`Eliminar o documento "${record.fileName}" (${payslipPeriodLabel(record.period)})? Esta ação é definitiva e não remove emails já enviados.`)) return;
+  const alertBox = qs("#payslipAlert");
+  deletingPayslipIds.add(String(id));
+  if (button) {
+    button.disabled = true;
+    button.textContent = "A eliminar...";
+  }
+  alertBox.textContent = "A eliminar recibo...";
+  let fileRemoved = false;
+  try {
+    if (record.storagePath) {
+      const { error } = await supabaseClient.storage.from(payslipStorageBucket).remove([record.storagePath]);
+      if (error) throw error;
+    }
+    fileRemoved = true;
+    const { data, error } = await supabaseClient.from("payslips").delete().eq("id", record.id).eq("user_id", record.userId).select("id");
+    if (error) throw error;
+    if (!data?.length) throw new Error("Não foi possível confirmar a remoção do registo.");
+    state.payslips = state.payslips.filter((item) => String(item.id) !== String(id));
+    persistLocalState();
+    renderPayslipList();
+    alertBox.textContent = "Recibo eliminado com sucesso.";
+  } catch (error) {
+    console.warn("Não foi possível eliminar o recibo.", error);
+    alertBox.textContent = fileRemoved
+      ? "O PDF foi removido, mas não foi possível eliminar o registo. Clique em Eliminar novamente para concluir."
+      : "Não foi possível eliminar o PDF. Tente novamente.";
+  } finally {
+    deletingPayslipIds.delete(String(id));
+    if (button) {
+      button.disabled = false;
+      button.textContent = "Eliminar";
+    }
   }
 }
 
@@ -6279,6 +6322,11 @@ document.addEventListener("click", (event) => {
   }
   if (target.closest("[data-open-payslip]")) {
     void openPayslipFile(target.closest("[data-open-payslip]").dataset.openPayslip);
+    return;
+  }
+  if (target.closest("[data-delete-payslip]")) {
+    const button = target.closest("[data-delete-payslip]");
+    void deletePayslip(button.dataset.deletePayslip, button);
     return;
   }
   if (target.closest("[data-vacation-map-cell]")) {

@@ -3744,3 +3744,40 @@ dialog::backdrop {
     font-size: 10px;
   }
 }
+
+/* Payslip actions and status spacing. */
+.payslip-item-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+.payslip-item-actions button:disabled {
+  opacity: 0.6;
+  cursor: wait;
+}
+.payslip-dialog-shell {
+  padding-bottom: 20px;
+}
+.payslip-dialog .payslip-alert {
+  min-height: 0;
+  margin: 16px 24px 0;
+  padding: 12px 16px;
+  border: 1px solid #fecaca;
+  border-radius: 10px;
+  background: #fff1f2;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+.payslip-dialog .payslip-alert:empty {
+  display: none;
+}
+@media (max-width: 700px) {
+  .payslip-item-actions {
+    grid-column: 2 / -1;
+    justify-self: start;
+  }
+  .payslip-dialog .payslip-alert {
+    margin-inline: 12px;
+  }
+}
